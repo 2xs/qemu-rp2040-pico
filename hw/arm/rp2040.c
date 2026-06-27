@@ -11,10 +11,28 @@
 #include "qapi/error.h"
 #include "hw/arm/rp2040.h"
 #include "hw/core/qdev-clock.h"
+#include "hw/core/loader.h"
 #include "hw/misc/unimp.h"
 #include "target/arm/cpu-qom.h"
 
 #define RP2040_SYSCLK_FRQ 125000000
+#define RP2040_UART0_BASE 0x40034000
+#define RP2040_UART0_IRQ  20
+
+/*
+ * Temporary boot ROM used until a faithful RP2040 boot ROM is modeled.
+ * It uses a fixed stack top, loads the reset handler from the XIP vector
+ * table, and branches to it.
+ */
+static const uint8_t rp2040_bootrom[] = {
+    0x00, 0x20, 0x04, 0x20, /* initial SP: 0x20042000 */
+    0x09, 0x00, 0x00, 0x00, /* reset handler: 0x00000009 */
+    0x01, 0x48,             /* ldr r0, [pc, #4] */
+    0x01, 0x68,             /* ldr r1, [r0] */
+    0x08, 0x47,             /* bx r1 */
+    0xfe, 0xe7,             /* b . */
+    0x04, 0x00, 0x00, 0x10, /* XIP reset vector address: 0x10000004 */
+};
 
 static const struct {
     const char *name;
@@ -34,7 +52,6 @@ static const struct {
     { "rp2040.pll_sys",  0x40028000, 0x4000 },
     { "rp2040.pll_usb",  0x4002c000, 0x4000 },
     { "rp2040.busctrl",  0x40030000, 0x4000 },
-    { "rp2040.uart0",    0x40034000, 0x4000 },
     { "rp2040.uart1",    0x40038000, 0x4000 },
     { "rp2040.spi0",     0x4003c000, 0x4000 },
     { "rp2040.spi1",     0x40040000, 0x4000 },
@@ -65,6 +82,9 @@ static void rp2040_soc_init(Object *obj)
                          ARM_CPU_TYPE_NAME("cortex-m0"));
     qdev_prop_set_uint32(DEVICE(&s->armv7m), "num-irq", 32);
 
+    object_initialize_child(obj, "uart0", &s->uart0, TYPE_PL011);
+    object_property_add_alias(obj, "serial0", OBJECT(&s->uart0), "chardev");
+
     s->sysclk = clock_new(obj, "sysclk");
     clock_set_hz(s->sysclk, RP2040_SYSCLK_FRQ);
 }
@@ -85,6 +105,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     memory_region_add_subregion(s->board_memory, RP2040_ROM_BASE, &s->rom);
+    rom_add_blob_fixed("rp2040.bootrom", rp2040_bootrom,
+                       sizeof(rp2040_bootrom), RP2040_ROM_BASE);
 
     for (i = 0; i < 4; i++) {
         g_autofree char *name = g_strdup_printf("rp2040.sram%d", i);
@@ -130,6 +152,14 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp)) {
         return;
     }
+
+    qdev_connect_clock_in(DEVICE(&s->uart0), "clk", s->sysclk);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->uart0), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart0), 0, RP2040_UART0_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart0), 0,
+                       qdev_get_gpio_in(DEVICE(&s->armv7m), RP2040_UART0_IRQ));
 }
 
 static const Property rp2040_soc_properties[] = {
