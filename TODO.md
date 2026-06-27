@@ -62,38 +62,45 @@ Baseline commands used:
 
 ## Phase 4: Firmware Loading and Initial Execution
 
-- [ ] Decide the first boot policy: direct `-kernel` load into XIP at `0x10000000`.
-- [ ] Add firmware loading through `armv7m_load_kernel()`.
-- [ ] Confirm ELF loading behavior for images linked at `0x10000000`.
+- [x] Decide the first boot policy: direct `-kernel` load into XIP at `0x10000000`.
+- [x] Add firmware loading through `armv7m_load_kernel()`.
+- [x] Confirm ELF loading behavior for images linked at `0x10000000`.
 - [ ] Confirm raw binary loading behavior.
-- [ ] Create or obtain a tiny bare-metal test firmware that loops.
-- [ ] Launch QEMU with the test firmware.
-- [ ] Confirm the CPU reaches guest code instead of failing during reset/vector fetch.
-- [ ] Document any temporary boot behavior that differs from real RP2040 boot ROM flow.
+- [x] Create or obtain a tiny bare-metal test firmware that loops.
+- [x] Launch QEMU with the test firmware.
+- [x] Confirm the CPU reaches guest code instead of failing during reset/vector fetch.
+- [x] Document any temporary boot behavior that differs from real RP2040 boot ROM flow.
+
+Current temporary boot behavior:
+
+- QEMU installs a tiny synthetic boot ROM at `0x00000000`.
+- The synthetic ROM uses a fixed SRAM stack top and branches to the reset
+  handler from the XIP vector table at `0x10000004`.
+- This is only a bring-up path; it is not a faithful RP2040 mask ROM model.
 
 ## Phase 5: Boot ROM Strategy
 
 - [ ] Review `/tmp/rp2040-rfc-patches/0004-pc-bios-add-pipico-mask-rom-upstream.patch`.
 - [ ] Review `/tmp/rp2040-rfc-patches/0005-hw-arm-add-mask-boot-ROM-logic.patch`.
 - [ ] Do not import the extracted binary `pc-bios/pipico.rom` as-is for an upstreamable path.
-- [ ] Decide whether the initial implementation uses an empty/simplified ROM or requires a user-supplied ROM.
+- [x] Decide whether the initial implementation uses an empty/simplified ROM or requires a user-supplied ROM.
 - [ ] If using a ROM image, make loading optional and document the file name and search path.
-- [ ] If using a simplified ROM, document exactly what it does and does not emulate.
-- [ ] Build `arm-softmmu`.
-- [ ] Verify direct XIP boot still works.
+- [x] If using a simplified ROM, document exactly what it does and does not emulate.
+- [x] Build `arm-softmmu`.
+- [x] Verify direct XIP boot still works.
 
 ## Phase 6: Minimal UART0 Console
 
-- [ ] Identify the best existing QEMU UART model or decide that a small RP2040 UART shim is needed.
-- [ ] Map UART0 at `0x40034000`.
-- [ ] Connect UART0 to QEMU serial chardev infrastructure.
-- [ ] Implement enough registers for polling transmit.
+- [x] Identify the best existing QEMU UART model or decide that a small RP2040 UART shim is needed.
+- [x] Map UART0 at `0x40034000`.
+- [x] Connect UART0 to QEMU serial chardev infrastructure.
+- [x] Implement enough registers for polling transmit.
 - [ ] Return stable documented values for unimplemented UART status bits.
-- [ ] Create or obtain a bare-metal hello-world firmware using UART0.
-- [ ] Launch with `-nographic` or `-serial stdio`.
-- [ ] Confirm hello-world text is visible.
-- [ ] Build `arm-softmmu`.
-- [ ] Run style/checkpatch checks for the UART changes.
+- [x] Create or obtain a bare-metal hello-world firmware using UART0.
+- [x] Launch with a host serial backend.
+- [x] Confirm hello-world text is visible.
+- [x] Build `arm-softmmu`.
+- [x] Run style/checkpatch checks for the UART changes.
 
 ## Phase 7: First Automated Test
 
@@ -194,10 +201,10 @@ Baseline commands used:
 ## Minimal Success Criteria
 
 - [x] `qemu-system-arm -machine help` lists `raspi-pico`.
-- [ ] QEMU can load a bare-metal firmware with `-kernel`.
-- [ ] Guest code executes from XIP at `0x10000000`.
-- [ ] Guest code can use SRAM at `0x20000000`.
-- [ ] UART output is visible on the host.
+- [x] QEMU can load a bare-metal firmware with `-kernel`.
+- [x] Guest code executes from XIP at `0x10000000`.
+- [x] Guest code can use SRAM at `0x20000000`.
+- [x] UART output is visible on the host.
 - [ ] Guest code can read XIP flash contents.
 - [ ] Guest code can erase and program at least one flash sector/page.
 - [ ] Flash changes persist in a raw host file across two QEMU runs.

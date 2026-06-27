@@ -376,6 +376,7 @@ config RASPI_PICO
 config RP2040
     bool
     select ARM_V7M
+    select PL011
     select UNIMP
 
 config STM32F100_SOC

@@ -10,6 +10,7 @@
 #define HW_ARM_RP2040_H
 
 #include "hw/arm/armv7m.h"
+#include "hw/char/pl011.h"
 #include "hw/core/clock.h"
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
@@ -31,6 +32,7 @@ struct RP2040State {
     SysBusDevice parent_obj;
 
     ARMv7MState armv7m;
+    PL011State uart0;
 
     MemoryRegion *board_memory;
     MemoryRegion rom;
