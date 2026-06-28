@@ -29,6 +29,7 @@ Supported devices
  * 264 KiB SRAM
  * 2 MiB external flash contents mapped through the XIP window
  * Minimal clock generator and crystal oscillator registers
+ * Minimal PLL_SYS and PLL_USB registers
  * Minimal reset controller registers
  * UART0 console
 
@@ -87,9 +88,11 @@ tight polling loop on ``rp2040.clocks`` offset ``0x44`` (``0x40008044``)
 and the XOSC stability poll on ``rp2040.xosc`` offset ``0x04``
 (``0x40024004``) now complete.  The reset-done poll on ``rp2040.resets``
 offset ``0x08`` (``0x4000c008``) also completes.  The current observed tight
-polling loop is a repeated read from ``rp2040.pll_sys`` offset ``0x00``
-(``0x40028000``), after the ROM writes ``CS``, ``FBDIV_INT``, ``PRIM`` and
-the atomic clear alias for ``PWR``.
+polling loop on ``rp2040.pll_sys`` offset ``0x00`` (``0x40028000``) also
+completes.  The ROM then switches ``clk_sys`` to the PLL path, writes
+watchdog scratch registers, and reaches a HardFault on ``0x14003000``.  This
+is the next bring-up target and appears to be an XIP alias/cache view rather
+than a PLL issue.
 
 Clock and XOSC model
 --------------------
@@ -124,6 +127,25 @@ The current QEMU model stores ``RESET`` and ``WDSEL`` for documented bits
 ``RESET_DONE`` immediately as the inverse of ``RESET`` for those bits.  It
 does not yet propagate resets into the individual peripheral models or model
 reset completion delays.
+
+PLL model
+---------
+
+The RP2040 datasheet describes ``PLL_SYS`` and ``PLL_USB`` at ``0x40028000``
+and ``0x4002c000``.  Each PLL exposes ``CS``, ``PWR``, ``FBDIV_INT`` and
+``PRIM`` registers; firmware powers the PLL, waits for ``CS.LOCK``, and then
+enables the post dividers.  The documented output frequency is
+``(FREF / REFDIV) * FBDIV / (POSTDIV1 * POSTDIV2)``.  See datasheet pages
+228 to 233.
+
+The current QEMU model is intentionally shallow.  It stores the visible
+registers, implements atomic alias writes, reports ``CS.LOCK`` immediately
+when the PLL core is powered, and publishes a calculated QEMU ``Clock``
+output.  This does not change instruction execution speed directly.  In QEMU,
+``Clock`` objects describe the modeled hardware clock tree; TCG execution
+rate is not a cycle-accurate function of the guest PLL.  The RP2040 clock
+generator model still uses fixed PLL_SYS/PLL_USB frequencies, so dynamic PLL
+output wiring is left for a later fidelity step.
 
 RP2040 flash and XIP model
 --------------------------
@@ -232,6 +254,6 @@ Known limitations
    modeled.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.
- * USB, PIO, DMA, watchdog, PLLs and most peripherals are not yet
-   implemented.  The current real mask ROM blocker is ``PLL_SYS`` lock/status
-   polling.
+ * USB, PIO, DMA, watchdog and most peripherals are not yet implemented.  The
+   current real mask ROM blocker is a HardFault on ``0x14003000`` after
+   ``PLL_SYS`` setup.
