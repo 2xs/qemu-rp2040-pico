@@ -55,6 +55,10 @@ static void raspi_pico_init(MachineState *machine)
         qdev_prop_set_string(DEVICE(&s->soc.xip), "flash-file",
                              s->flash_file);
     }
+    if (machine->firmware) {
+        qdev_prop_set_string(DEVICE(&s->soc), "bootrom-file",
+                             machine->firmware);
+    }
     object_property_set_link(OBJECT(&s->soc), "memory",
                              OBJECT(system_memory), &error_fatal);
 
@@ -62,7 +66,7 @@ static void raspi_pico_init(MachineState *machine)
 
     /*
      * For now, -kernel images are loaded directly into the XIP window.
-     * A faithful boot ROM and SSI/QSPI model will be added later.
+     * rp2040_xip_load_image() accepts ELF images first, then raw images.
      */
     rp2040_xip_load_image(&s->soc.xip, machine->kernel_filename,
                           &error_fatal);

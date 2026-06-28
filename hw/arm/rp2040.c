@@ -11,8 +11,10 @@
 #include "qapi/error.h"
 #include "hw/arm/rp2040.h"
 #include "hw/core/qdev-clock.h"
+#include "hw/core/qdev-properties.h"
 #include "hw/core/loader.h"
 #include "hw/misc/unimp.h"
+#include "qemu/datadir.h"
 #include "target/arm/cpu-qom.h"
 
 #define RP2040_SYSCLK_FRQ 125000000
@@ -101,6 +103,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
 {
     RP2040State *s = RP2040(dev);
     Error *err = NULL;
+    g_autofree char *filename = NULL;
+    ssize_t image_size;
     int i;
 
     if (!s->board_memory) {
@@ -113,8 +117,25 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     memory_region_add_subregion(s->board_memory, RP2040_ROM_BASE, &s->rom);
-    rom_add_blob_fixed("rp2040.bootrom", rp2040_bootrom,
-                       sizeof(rp2040_bootrom), RP2040_ROM_BASE);
+
+    if (s->bootrom_file) {
+        filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, s->bootrom_file);
+        if (!filename) {
+            error_setg(errp, "could not find RP2040 boot ROM image '%s'",
+                       s->bootrom_file);
+            return;
+        }
+
+        image_size = load_image_mr(filename, &s->rom);
+        if (image_size < 0) {
+            error_setg(errp, "could not load RP2040 boot ROM image '%s'",
+                       filename);
+            return;
+        }
+    } else {
+        rom_add_blob_fixed("rp2040.bootrom", rp2040_bootrom,
+                           sizeof(rp2040_bootrom), RP2040_ROM_BASE);
+    }
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->xip), errp)) {
         return;
@@ -180,6 +201,7 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
 static const Property rp2040_soc_properties[] = {
     DEFINE_PROP_LINK("memory", RP2040State, board_memory, TYPE_MEMORY_REGION,
                      MemoryRegion *),
+    DEFINE_PROP_STRING("bootrom-file", RP2040State, bootrom_file),
 };
 
 static void rp2040_soc_class_init(ObjectClass *klass, const void *data)
