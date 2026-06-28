@@ -4,6 +4,8 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import struct
+
 from qemu_test import QemuSystemTest, wait_for_console_pattern
 
 
@@ -19,6 +21,42 @@ class RaspiPicoMachine(QemuSystemTest):
         0x41, 0x52, 0x54, 0x20, 0x4f, 0x4b, 0x0a, 0x00,
         0x00, 0x40, 0x03, 0x40, 0x1a, 0x00, 0x00, 0x10,
     ])
+
+    @staticmethod
+    def make_xip_elf(payload):
+        load_addr = 0x10000000
+        payload_off = 0x100
+
+        elf_header = struct.pack(
+            '<16sHHIIIIIHHHHHH',
+            b'\x7fELF\x01\x01\x01' + b'\x00' * 9,
+            2,          # ET_EXEC
+            40,         # EM_ARM
+            1,          # EV_CURRENT
+            load_addr,
+            52,         # e_phoff
+            0,          # e_shoff
+            0x05000200, # EABI version 5, soft-float
+            52,         # e_ehsize
+            32,         # e_phentsize
+            1,          # e_phnum
+            0,
+            0,
+            0,
+        )
+        phdr = struct.pack(
+            '<IIIIIIII',
+            1,          # PT_LOAD
+            payload_off,
+            load_addr,
+            load_addr,
+            len(payload),
+            len(payload),
+            5,          # PF_R | PF_X
+            4,
+        )
+
+        return elf_header + phdr + bytes(payload_off - 84) + payload
 
     # Copies a small routine to SRAM, erases/programs flash through the SSI
     # registers, polls status once, then verifies the programmed bytes via XIP.
@@ -104,6 +142,19 @@ class RaspiPicoMachine(QemuSystemTest):
         image = self.scratch_file('uart-test.bin')
         with open(image, 'wb') as image_file:
             image_file.write(self.UART_TEST_BIN)
+
+        self.vm.set_console()
+        self.vm.add_args('-kernel', image)
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'PICO UART OK')
+
+    def test_uart0_elf(self):
+        self.set_machine('raspi-pico')
+
+        image = self.scratch_file('uart-test.elf')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_xip_elf(self.UART_TEST_BIN))
 
         self.vm.set_console()
         self.vm.add_args('-kernel', image)

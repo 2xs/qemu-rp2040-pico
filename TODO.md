@@ -39,7 +39,6 @@ Current RFC integration status:
 - [x] Confirm the working tree is clean or identify unrelated local changes.
 - [x] Create a dedicated branch for the Pico/RP2040 work.
 - [x] Configure a minimal `arm-softmmu` build.
-- [ ] Build the unmodified tree once.
 - [x] Record the exact baseline command used for configure/build/test.
 
 Baseline commands used:
@@ -94,7 +93,7 @@ Baseline commands used:
 
 - [x] Decide the first boot policy: direct `-kernel` load into XIP at `0x10000000`.
 - [x] Add firmware reset registration through `armv7m_load_kernel()`.
-- [ ] Restore or confirm ELF loading behavior for images linked at `0x10000000`.
+- [x] Restore or confirm ELF loading behavior for images linked at `0x10000000`.
 - [x] Confirm raw binary loading behavior.
 - [x] Create or obtain a tiny bare-metal test firmware that loops.
 - [x] Launch QEMU with the test firmware.
@@ -104,9 +103,9 @@ Baseline commands used:
 Current temporary boot behavior:
 
 - QEMU installs a tiny synthetic boot ROM at `0x00000000`.
-- `-kernel` is currently treated as a raw XIP image loaded into the emulated
-  flash storage. The `armv7m_load_kernel()` helper is still used to register
-  reset handling, not to load the image bytes.
+- `-kernel` is loaded into the emulated XIP flash storage through the RP2040
+  XIP loader, which accepts ELF images first and raw images as a fallback.
+  The `armv7m_load_kernel()` helper is still used to register reset handling.
 - The synthetic ROM uses a fixed SRAM stack top, sets `VTOR` to the XIP vector
   table, and branches to the reset handler from `0x10000004`.
 - This is only a bring-up path; it is not a faithful RP2040 mask ROM model.
@@ -118,7 +117,7 @@ Current temporary boot behavior:
 - [x] Do not import the extracted binary `pc-bios/pipico.rom` as-is for an upstreamable path.
 - [x] Copy the RFC `pc-bios/pipico.rom` image locally so it is available for bring-up experiments.
 - [x] Decide whether the initial implementation uses an empty/simplified ROM or requires a user-supplied ROM.
-- [ ] If using a ROM image, make loading optional and document the file name and search path.
+- [x] If using a ROM image, make loading optional and document the file name and search path.
 - [x] If using a simplified ROM, document exactly what it does and does not emulate.
 - [x] Build `arm-softmmu`.
 - [x] Verify direct XIP boot still works.
@@ -126,6 +125,8 @@ Current temporary boot behavior:
 Current boot ROM strategy note:
 
 - The RFC ROM image is present locally and listed with the QEMU BIOS blobs.
+- A ROM image can be supplied explicitly with `-bios`, and is resolved through
+  QEMU's BIOS search path.
 - The active boot path is still the synthetic boot ROM described in phase 4.
 - The RFC mask ROM loader from patch 0005 should be integrated or adapted next
   behind a deliberate boot-ROM policy, then debugged against the minimal SoC
@@ -137,7 +138,7 @@ Current boot ROM strategy note:
 - [x] Map UART0 at `0x40034000`.
 - [x] Connect UART0 to QEMU serial chardev infrastructure.
 - [x] Implement enough registers for polling transmit.
-- [ ] Return stable documented values for unimplemented UART status bits.
+- [x] Return stable documented values for unimplemented UART status bits.
 - [x] Create or obtain a bare-metal hello-world firmware using UART0.
 - [x] Launch with a host serial backend.
 - [x] Confirm hello-world text is visible.

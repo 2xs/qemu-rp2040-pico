@@ -7,6 +7,7 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "qapi/error.h"
+#include "elf.h"
 #include "exec/memattrs.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/loader.h"
@@ -16,6 +17,7 @@
 #define RP2040_XIP_CTRL_ERR_BADWRITE 0x2
 #define RP2040_XIP_STAT_FLUSH_READY  0x1
 #define RP2040_XIP_STAT_FIFO_EMPTY   0x2
+#define RP2040_XIP_FLASH_BASE        0x10000000
 
 #define RP2040_SSI_CTRLR0     0x00
 #define RP2040_SSI_CTRLR1     0x04
@@ -429,12 +431,84 @@ void rp2040_xip_set_writable(RP2040XipState *s, bool writable)
     s->xip_writable = writable;
 }
 
+static bool rp2040_xip_load_elf(RP2040XipState *s, const char *filename,
+                                Error **errp)
+{
+    g_autofree gchar *contents = NULL;
+    gsize len;
+    const Elf32_Ehdr *ehdr;
+    const Elf32_Phdr *phdr;
+    int i;
+
+    if (!g_file_get_contents(filename, &contents, &len, NULL)) {
+        error_setg(errp, "could not load flash image '%s'", filename);
+        return true;
+    }
+
+    if (len < sizeof(*ehdr)) {
+        return false;
+    }
+
+    ehdr = (const Elf32_Ehdr *)contents;
+    if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
+        return false;
+    }
+    if (ehdr->e_ident[EI_CLASS] != ELFCLASS32 ||
+        ehdr->e_ident[EI_DATA] != ELFDATA2LSB ||
+        le16_to_cpu(ehdr->e_machine) != EM_ARM) {
+        error_setg(errp, "unsupported flash ELF image '%s'", filename);
+        return true;
+    }
+    if (le32_to_cpu(ehdr->e_phoff) > len ||
+        le16_to_cpu(ehdr->e_phentsize) != sizeof(*phdr) ||
+        le16_to_cpu(ehdr->e_phnum) >
+        (len - le32_to_cpu(ehdr->e_phoff)) / sizeof(*phdr)) {
+        error_setg(errp, "invalid flash ELF image '%s'", filename);
+        return true;
+    }
+
+    phdr = (const Elf32_Phdr *)(contents + le32_to_cpu(ehdr->e_phoff));
+    for (i = 0; i < le16_to_cpu(ehdr->e_phnum); i++) {
+        uint32_t paddr = le32_to_cpu(phdr[i].p_paddr);
+        uint32_t filesz = le32_to_cpu(phdr[i].p_filesz);
+        uint32_t memsz = le32_to_cpu(phdr[i].p_memsz);
+        uint32_t off = le32_to_cpu(phdr[i].p_offset);
+        uint32_t xip_off;
+
+        if (le32_to_cpu(phdr[i].p_type) != PT_LOAD) {
+            continue;
+        }
+
+        if (paddr < RP2040_XIP_FLASH_BASE ||
+            paddr - RP2040_XIP_FLASH_BASE > s->flash_size ||
+            filesz > memsz ||
+            memsz > s->flash_size - (paddr - RP2040_XIP_FLASH_BASE) ||
+            off > len ||
+            filesz > len - off) {
+            error_setg(errp, "flash ELF segment is outside XIP storage");
+            return true;
+        }
+
+        xip_off = paddr - RP2040_XIP_FLASH_BASE;
+        memcpy(s->storage + xip_off, contents + off, filesz);
+        if (memsz > filesz) {
+            memset(s->storage + xip_off + filesz, 0, memsz - filesz);
+        }
+    }
+
+    return true;
+}
+
 void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
                            Error **errp)
 {
     ssize_t image_size;
 
     if (!filename) {
+        return;
+    }
+
+    if (rp2040_xip_load_elf(s, filename, errp)) {
         return;
     }
 

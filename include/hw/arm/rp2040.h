@@ -39,6 +39,7 @@ struct RP2040State {
     MemoryRegion *board_memory;
     MemoryRegion rom;
     MemoryRegion sram[6];
+    char *bootrom_file;
 
     Clock *sysclk;
 };

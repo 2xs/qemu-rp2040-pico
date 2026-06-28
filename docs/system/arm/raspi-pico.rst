@@ -33,8 +33,9 @@ Supported devices
 Boot options
 ------------
 
-For direct bring-up, a raw firmware image can be loaded into the XIP window with
-``-kernel``:
+For direct bring-up, a firmware image can be loaded into the XIP window with
+``-kernel``.  ELF images linked at ``0x10000000`` are accepted, with raw
+images loaded at ``0x10000000`` as a fallback:
 
 .. code-block:: bash
 
@@ -48,6 +49,19 @@ The machine also accepts a raw initial flash image:
 
 Bytes not provided by the raw flash image are initialized to the NOR erased
 state, ``0xff``.
+
+An RP2040 boot ROM image can be supplied explicitly with ``-bios``:
+
+.. code-block:: bash
+
+  $ qemu-system-arm -machine raspi-pico -bios pipico.rom -serial stdio
+
+The file name is resolved through QEMU's BIOS search path, the same mechanism
+used by other machines for firmware blobs.  The RFC ``pipico.rom`` image is
+installed as a QEMU BIOS blob for local bring-up, but the current RP2040 model
+does not yet provide all hardware behaviour needed by the real mask ROM boot
+flow.  If ``-bios`` is omitted, QEMU keeps using the synthetic boot ROM
+described above.
 
 RP2040 flash and XIP model
 --------------------------
@@ -117,11 +131,41 @@ and HardFault behaviour on pages 71 to 72.  This is an emulation policy chosen
 to make incorrect execute-from-XIP-while-programming behaviour visible and
 testable.  It is not intended to model precise flash timing.
 
+UART0 model
+-----------
+
+The RP2040 datasheet states that each UART instance is based on ARM PrimeCell
+UART PL011 revision r1p5, with 32-byte transmit and receive FIFOs.  It also
+states that PL011 modem mode and IrDA mode are not supported by RP2040.  See
+datasheet pages 417 to 419.
+
+The current QEMU model therefore wires UART0 at ``0x40034000`` to QEMU's
+existing PL011 device.  The register list and flag register layout match the
+RP2040 UART programmer's model: ``UARTDR`` is at offset ``0x000``,
+``UARTRSR/UARTECR`` at ``0x004`` and ``UARTFR`` at ``0x018``.  See datasheet
+pages 429 to 431.
+
+For the initial console use case, the documented stable status behaviour is:
+
+ * ``UARTFR.TXFE`` and ``UARTFR.RXFE`` follow QEMU PL011 FIFO state.
+ * ``UARTFR.TXFF`` and ``UARTFR.RXFF`` follow QEMU PL011 FIFO fullness.
+ * ``UARTFR.BUSY`` is not modeled with RP2040 transmission timing.
+ * ``UARTFR.RI``, ``UARTFR.DCD`` and ``UARTFR.DSR`` are treated as absent
+   modem-status inputs and remain deasserted.
+ * ``UARTFR.CTS`` has no GPIO-backed CTS input yet and remains deasserted
+   unless a future RP2040 UART shim connects it to the GPIO model.
+
+This is sufficient for polling transmit firmware that waits for ``TXFF`` to
+clear before writing ``UARTDR``.  A dedicated RP2040 UART wrapper can be added
+later if firmware needs GPIO-backed CTS/RTS flow control, precise ``BUSY``
+timing, or stricter masking of unsupported PL011 modem/IrDA features.
+
 Known limitations
 -----------------
 
  * Only core 0 is modeled.
- * UART0 currently uses QEMU's PL011 model directly.
+ * UART0 currently uses QEMU's PL011 model directly, with the RP2040
+   compatibility policy documented above.
  * The XIP cache, XIP aliases, streaming FIFO and detailed timing are not yet
    modeled.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
