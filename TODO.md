@@ -36,8 +36,9 @@ Current RFC integration status:
 - Mask ROM bring-up tracing is available with `-d unimp,guest_errors` and
   logs named RP2040 MMIO accesses, including absolute addresses. The first
   observed blocker, repeated polling of `rp2040.clocks` at `0x40008044`, is
-  resolved by the minimal clock model. The current blocker is repeated polling
-  of `rp2040.resets` at `0x4000c008`.
+  resolved by the minimal clock model. The later blocker on `rp2040.resets`
+  at `0x4000c008` is resolved by the minimal reset controller. The current
+  blocker is repeated polling of `rp2040.pll_sys` at `0x40028000`.
 
 ## Phase 0: Baseline
 
@@ -148,9 +149,11 @@ Current mask ROM trace finding:
   (`0x40008044`). This now completes with the minimal clock model.
 - The ROM then enables XOSC and polls `xosc` offset `0x04`
   (`0x40024004`). This now completes with the minimal XOSC model.
-- The current tight polling loop is on `resets` offset `0x08`
-  (`0x4000c008`), which corresponds to reset-done state and is the next
-  boot-ROM bring-up target.
+- The ROM then polls `resets` offset `0x08` (`0x4000c008`) for reset-done
+  state. This now completes with the minimal reset controller.
+- The current tight polling loop is on `pll_sys` offset `0x00`
+  (`0x40028000`), after writes to `CS`, `FBDIV_INT`, `PRIM`, and the atomic
+  alias for `PWR`.
 
 ## Phase 6: Minimal UART0 Console
 
@@ -246,7 +249,7 @@ Current flash command model note:
 - [x] Move CPU and UART clock wiring onto QEMU `Clock` outputs from the
   RP2040 clock model.
 - [x] Avoid claiming full RP2040 clock fidelity.
-- [ ] Add a minimal reset-controller model for `RESET_DONE`.
+- [x] Add a minimal reset-controller model for `RESET_DONE`.
 - [ ] Add minimal watchdog/timer behavior only when needed by boot ROM or
   firmware tests.
 - [ ] Add regression tests for any behavior required by firmware boot.
@@ -262,8 +265,13 @@ Current clock/reset bring-up note:
   enable code `0xfab`, disable code `0xd1e`, `BADWRITE` sticky until cleared,
   and `STABLE` asserted immediately once enabled and awake.
 - The RFC `pipico.rom` no longer blocks on `CLK_SYS_SELECTED` or XOSC
-  `STATUS_STABLE`. It now blocks on the reset controller's `RESET_DONE`
-  register at `0x4000c008`.
+  `STATUS_STABLE`.
+- The reset controller exposes `RESET`, `WDSEL`, and `RESET_DONE`. `RESET`
+  resets all documented blocks at QEMU reset, `WDSEL` is stored, and
+  `RESET_DONE` is derived immediately as `~RESET` for bits 0..24, without
+  modeling reset propagation delay.
+- The RFC `pipico.rom` no longer blocks on `RESET_DONE`; it now blocks on
+  `pll_sys` offset `0x00` (`0x40028000`).
 
 ## Phase 13: Documentation
 

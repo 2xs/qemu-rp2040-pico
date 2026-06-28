@@ -48,7 +48,6 @@ static const struct {
 } rp2040_unimplemented[] = {
     { "rp2040.sysinfo",  0x40000000, 0x4000 },
     { "rp2040.syscfg",   0x40004000, 0x4000 },
-    { "rp2040.resets",   0x4000c000, 0x4000 },
     { "rp2040.psm",      0x40010000, 0x4000 },
     { "rp2040.iobank0",  0x40014000, 0x4000 },
     { "rp2040.ioqspi",   0x40018000, 0x4000 },
@@ -92,6 +91,7 @@ static void rp2040_soc_init(Object *obj)
 
     object_initialize_child(obj, "xip", &s->xip, TYPE_RP2040_XIP);
     object_initialize_child(obj, "clocks", &s->clocks, TYPE_RP2040_CLOCKS);
+    object_initialize_child(obj, "resets", &s->resets, TYPE_RP2040_RESETS);
     object_initialize_child(obj, "xosc", &s->xosc, TYPE_RP2040_XOSC);
 
     s->sysclk = clock_new(obj, "sysclk");
@@ -147,6 +147,11 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->clocks), 0, RP2040_CLOCKS_BASE);
     clock_set_source(s->sysclk, qdev_get_clock_out(DEVICE(&s->clocks),
                                                    "clk-sys"));
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->resets), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->resets), 0, RP2040_RESETS_BASE);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->xosc), errp)) {
         return;
