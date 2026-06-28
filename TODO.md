@@ -4,6 +4,36 @@ This checklist is the step-by-step plan for integrating a minimal
 Raspberry Pi Pico 1 target in QEMU, starting from Alex Bennee's RP2040 RFC
 patches and adapting them to the current tree.
 
+## RFC Lineage and Integration Policy
+
+- [x] Treat Alex Bennee's 2022 RP2040/Pico RFC series in
+  `/tmp/rp2040-rfc-patches` as the starting point for this work.
+- [x] Record which RFC patches were adapted, copied, or deliberately deferred.
+- [x] Adapt the RFC SoC skeleton, Pico machine, and memory map to the current
+  QEMU tree instead of importing stale APIs verbatim.
+- [x] Keep the RFC `pc-bios/pipico.rom` image available locally for bring-up
+  experiments.
+- [ ] Reconcile the RFC mask ROM loading logic with the current synthetic XIP
+  boot path.
+- [ ] Prefer using the RFC implementation as-is when it still fits current
+  QEMU APIs; otherwise debug and document the required adaptation.
+
+Current RFC integration status:
+
+- RFC patch 0001 is adapted as the current `RP2040` SoC skeleton, with current
+  Meson/Kconfig wiring and later UART/XIP extensions.
+- RFC patch 0002 is adapted as the `raspi-pico` machine.
+- RFC patch 0003 is adapted for the memory map. The main addresses are kept,
+  but the flash is now owned by a minimal RP2040 XIP/SSI device and defaults
+  to the official Pico 1 flash size of 2 MiB.
+- RFC patch 0004 is copied as `pc-bios/pipico.rom` for local bring-up. It is
+  treated as a useful reference artifact, not as a final upstream boot ROM
+  provenance answer.
+- RFC patch 0005 has been reviewed but is not the active boot path yet. The
+  current model keeps a synthetic boot ROM so direct XIP tests remain stable;
+  the next boot-ROM step is to integrate or adapt the RFC mask ROM loading and
+  debug the extra RP2040 blocks the real ROM requires.
+
 ## Phase 0: Baseline
 
 - [x] Confirm the working tree is clean or identify unrelated local changes.
@@ -63,9 +93,9 @@ Baseline commands used:
 ## Phase 4: Firmware Loading and Initial Execution
 
 - [x] Decide the first boot policy: direct `-kernel` load into XIP at `0x10000000`.
-- [x] Add firmware loading through `armv7m_load_kernel()`.
-- [x] Confirm ELF loading behavior for images linked at `0x10000000`.
-- [ ] Confirm raw binary loading behavior.
+- [x] Add firmware reset registration through `armv7m_load_kernel()`.
+- [ ] Restore or confirm ELF loading behavior for images linked at `0x10000000`.
+- [x] Confirm raw binary loading behavior.
 - [x] Create or obtain a tiny bare-metal test firmware that loops.
 - [x] Launch QEMU with the test firmware.
 - [x] Confirm the CPU reaches guest code instead of failing during reset/vector fetch.
@@ -74,21 +104,32 @@ Baseline commands used:
 Current temporary boot behavior:
 
 - QEMU installs a tiny synthetic boot ROM at `0x00000000`.
-- The synthetic ROM uses a fixed SRAM stack top and branches to the reset
-  handler from the XIP vector table at `0x10000004`.
+- `-kernel` is currently treated as a raw XIP image loaded into the emulated
+  flash storage. The `armv7m_load_kernel()` helper is still used to register
+  reset handling, not to load the image bytes.
+- The synthetic ROM uses a fixed SRAM stack top, sets `VTOR` to the XIP vector
+  table, and branches to the reset handler from `0x10000004`.
 - This is only a bring-up path; it is not a faithful RP2040 mask ROM model.
 
 ## Phase 5: Boot ROM Strategy
 
-- [ ] Review `/tmp/rp2040-rfc-patches/0004-pc-bios-add-pipico-mask-rom-upstream.patch`.
-- [ ] Review `/tmp/rp2040-rfc-patches/0005-hw-arm-add-mask-boot-ROM-logic.patch`.
-- [ ] Do not import the extracted binary `pc-bios/pipico.rom` as-is for an upstreamable path.
+- [x] Review `/tmp/rp2040-rfc-patches/0004-pc-bios-add-pipico-mask-rom-upstream.patch`.
+- [x] Review `/tmp/rp2040-rfc-patches/0005-hw-arm-add-mask-boot-ROM-logic.patch`.
+- [x] Do not import the extracted binary `pc-bios/pipico.rom` as-is for an upstreamable path.
 - [x] Copy the RFC `pc-bios/pipico.rom` image locally so it is available for bring-up experiments.
 - [x] Decide whether the initial implementation uses an empty/simplified ROM or requires a user-supplied ROM.
 - [ ] If using a ROM image, make loading optional and document the file name and search path.
 - [x] If using a simplified ROM, document exactly what it does and does not emulate.
 - [x] Build `arm-softmmu`.
 - [x] Verify direct XIP boot still works.
+
+Current boot ROM strategy note:
+
+- The RFC ROM image is present locally and listed with the QEMU BIOS blobs.
+- The active boot path is still the synthetic boot ROM described in phase 4.
+- The RFC mask ROM loader from patch 0005 should be integrated or adapted next
+  behind a deliberate boot-ROM policy, then debugged against the minimal SoC
+  model instead of discarded.
 
 ## Phase 6: Minimal UART0 Console
 
@@ -134,8 +175,8 @@ Current XIP backing note:
 
 - `raspi-pico` exposes `flash-file=/path/to/flash.bin` as a raw initial XIP
   image. Missing bytes are initialized to erased NOR state, `0xff`.
-- The region is still read-only from the guest. Programming, erase, writeback,
-  and persistence are intentionally deferred to later phases.
+- Guest programming and erase now go through the minimal RP2040 XIP/SSI model.
+  Host writeback and persistence are intentionally deferred to phase 11.
 
 ## Phase 9: Minimal Flash Programming Model
 
@@ -184,16 +225,16 @@ Current flash command model note:
 
 ## Phase 13: Documentation
 
-- [ ] Add user documentation for the `raspi-pico` machine.
-- [ ] Document RAM size.
-- [ ] Document flash size.
-- [ ] Document XIP address `0x10000000`.
-- [ ] Document SRAM address `0x20000000`.
-- [ ] Document the `-kernel` launch flow.
-- [ ] Document UART console usage.
-- [ ] Document flash backing file usage when available.
-- [ ] Document known limitations.
-- [ ] Add short developer notes explaining simplified versus faithful RP2040 behavior.
+- [x] Add user documentation for the `raspi-pico` machine.
+- [x] Document RAM size.
+- [x] Document flash size.
+- [x] Document XIP address `0x10000000`.
+- [x] Document SRAM address `0x20000000`.
+- [x] Document the `-kernel` launch flow.
+- [x] Document UART console usage.
+- [x] Document flash backing file usage when available.
+- [x] Document known limitations.
+- [x] Add short developer notes explaining simplified versus faithful RP2040 behavior.
 
 ## Phase 14: Patch Series Preparation
 
@@ -226,6 +267,6 @@ Current flash command model note:
 - [x] Guest code executes from XIP at `0x10000000`.
 - [x] Guest code can use SRAM at `0x20000000`.
 - [x] UART output is visible on the host.
-- [ ] Guest code can read XIP flash contents.
-- [ ] Guest code can erase and program at least one flash sector/page.
+- [x] Guest code can read XIP flash contents.
+- [x] Guest code can erase and program at least one flash sector/page.
 - [ ] Flash changes persist in a raw host file across two QEMU runs.
