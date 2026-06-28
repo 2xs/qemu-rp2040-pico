@@ -21,13 +21,10 @@
 #define TYPE_RASPI_PICO_MACHINE MACHINE_TYPE_NAME("raspi-pico")
 OBJECT_DECLARE_SIMPLE_TYPE(RaspiPicoMachineState, RASPI_PICO_MACHINE)
 
-#define PICO_FLASH_SIZE (2 * MiB)
-
 struct RaspiPicoMachineState {
     MachineState parent_obj;
 
     RP2040State soc;
-    MemoryRegion flash;
     char *flash_file;
 };
 
@@ -47,44 +44,6 @@ static void raspi_pico_set_flash_file(Object *obj, const char *value,
     s->flash_file = g_strdup(value);
 }
 
-static void raspi_pico_init_flash(RaspiPicoMachineState *s,
-                                  MemoryRegion *system_memory,
-                                  Error **errp)
-{
-    g_autofree gchar *contents = NULL;
-    gsize contents_len = 0;
-    uint8_t *flash;
-
-    if (!memory_region_init_ram(&s->flash, NULL, "raspi-pico.flash",
-                                PICO_FLASH_SIZE, errp)) {
-        return;
-    }
-
-    flash = memory_region_get_ram_ptr(&s->flash);
-    memset(flash, 0xff, PICO_FLASH_SIZE);
-
-    if (s->flash_file) {
-        if (!g_file_get_contents(s->flash_file, &contents, &contents_len,
-                                 NULL)) {
-            error_setg(errp, "could not load flash file '%s'",
-                       s->flash_file);
-            return;
-        }
-
-        if (contents_len > PICO_FLASH_SIZE) {
-            error_setg(errp, "flash file '%s' is %" G_GSIZE_FORMAT
-                       " bytes, larger than %" G_GSIZE_FORMAT
-                       " byte Pico flash",
-                       s->flash_file, contents_len, (gsize)PICO_FLASH_SIZE);
-            return;
-        }
-
-        memcpy(flash, contents, contents_len);
-    }
-
-    memory_region_add_subregion(system_memory, RP2040_XIP_BASE, &s->flash);
-}
-
 static void raspi_pico_init(MachineState *machine)
 {
     RaspiPicoMachineState *s = RASPI_PICO_MACHINE(machine);
@@ -92,10 +51,12 @@ static void raspi_pico_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "soc", &s->soc, TYPE_RP2040);
     qdev_prop_set_chr(DEVICE(&s->soc), "serial0", serial_hd(0));
+    if (s->flash_file) {
+        qdev_prop_set_string(DEVICE(&s->soc.xip), "flash-file",
+                             s->flash_file);
+    }
     object_property_set_link(OBJECT(&s->soc), "memory",
                              OBJECT(system_memory), &error_fatal);
-
-    raspi_pico_init_flash(s, system_memory, &error_fatal);
 
     sysbus_realize(SYS_BUS_DEVICE(&s->soc), &error_fatal);
 
@@ -103,9 +64,10 @@ static void raspi_pico_init(MachineState *machine)
      * For now, -kernel images are loaded directly into the XIP window.
      * A faithful boot ROM and SSI/QSPI model will be added later.
      */
-    armv7m_load_kernel(s->soc.armv7m.cpu, machine->kernel_filename,
-                       RP2040_XIP_BASE, PICO_FLASH_SIZE);
-    memory_region_set_readonly(&s->flash, true);
+    rp2040_xip_load_image(&s->soc.xip, machine->kernel_filename,
+                          &error_fatal);
+    armv7m_load_kernel(s->soc.armv7m.cpu, NULL, RP2040_XIP_BASE, 2 * MiB);
+    rp2040_xip_set_writable(&s->soc.xip, false);
 }
 
 static void raspi_pico_machine_finalize(Object *obj)

@@ -27,10 +27,16 @@
 static const uint8_t rp2040_bootrom[] = {
     0x00, 0x20, 0x04, 0x20, /* initial SP: 0x20042000 */
     0x09, 0x00, 0x00, 0x00, /* reset handler: 0x00000009 */
-    0x01, 0x48,             /* ldr r0, [pc, #4] */
+    0x03, 0x48,             /* ldr r0, [pc, #12] */
+    0x04, 0x49,             /* ldr r1, [pc, #16] */
+    0x01, 0x60,             /* str r1, [r0] */
+    0x04, 0x48,             /* ldr r0, [pc, #16] */
     0x01, 0x68,             /* ldr r1, [r0] */
     0x08, 0x47,             /* bx r1 */
     0xfe, 0xe7,             /* b . */
+    0x00, 0x00,             /* padding for word-aligned literals */
+    0x08, 0xed, 0x00, 0xe0, /* VTOR address: 0xe000ed08 */
+    0x00, 0x00, 0x00, 0x10, /* XIP vector table: 0x10000000 */
     0x04, 0x00, 0x00, 0x10, /* XIP reset vector address: 0x10000004 */
 };
 
@@ -85,6 +91,8 @@ static void rp2040_soc_init(Object *obj)
     object_initialize_child(obj, "uart0", &s->uart0, TYPE_PL011);
     object_property_add_alias(obj, "serial0", OBJECT(&s->uart0), "chardev");
 
+    object_initialize_child(obj, "xip", &s->xip, TYPE_RP2040_XIP);
+
     s->sysclk = clock_new(obj, "sysclk");
     clock_set_hz(s->sysclk, RP2040_SYSCLK_FRQ);
 }
@@ -107,6 +115,13 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(s->board_memory, RP2040_ROM_BASE, &s->rom);
     rom_add_blob_fixed("rp2040.bootrom", rp2040_bootrom,
                        sizeof(rp2040_bootrom), RP2040_ROM_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->xip), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 0, RP2040_XIP_BASE);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 1, RP2040_XIP_CTRL_BASE);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 2, RP2040_XIP_SSI_BASE);
 
     for (i = 0; i < 4; i++) {
         g_autofree char *name = g_strdup_printf("rp2040.sram%d", i);
