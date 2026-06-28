@@ -28,6 +28,7 @@ Supported devices
  * 16 KiB boot ROM window
  * 264 KiB SRAM
  * 2 MiB external flash contents mapped through the XIP window
+ * Minimal clock generator and crystal oscillator registers
  * UART0 console
 
 Boot options
@@ -80,10 +81,31 @@ register block also logs APB register accesses through the same ``unimp`` log
 mask, without logging every normal XIP instruction fetch.
 
 At the current level of emulation, the RFC ``pipico.rom`` image reaches its
-reset handler and then blocks in early clock setup.  The first tight polling
-loop observed is a repeated read from ``rp2040.clocks`` offset ``0x44``
-(``0x40008044``), which currently returns zero because the clock block is only
-stubbed.
+reset handler and progresses through the first clock setup loops.  The earlier
+tight polling loop on ``rp2040.clocks`` offset ``0x44`` (``0x40008044``)
+and the XOSC stability poll on ``rp2040.xosc`` offset ``0x04``
+(``0x40024004``) now complete.  The current observed tight polling loop is a
+repeated read from ``rp2040.resets`` offset ``0x08`` (``0x4000c008``), i.e.
+the next bring-up target is the reset controller's reset-done state.
+
+Clock and XOSC model
+--------------------
+
+The RP2040 datasheet describes clock generator ``SELECTED`` registers as
+one-hot status registers for glitchless muxes, and notes that software should
+poll them until a source switch completes.  See datasheet pages 203 to 216.
+The current QEMU model returns stable one-hot selected values immediately and
+updates QEMU ``Clock`` outputs for ``clk-ref``, ``clk-sys``, ``clk-peri``,
+``clk-usb``, ``clk-adc`` and ``clk-rtc``.  It models frequencies and software
+visible register state, not analog transition latency.
+
+The crystal oscillator model follows the XOSC programmer-visible behaviour
+described by the datasheet: XOSC starts disabled, firmware writes the enable
+code to ``CTRL``, and then polls ``STATUS.STABLE`` until the oscillator is
+usable.  See datasheet pages 217 to 220.  QEMU asserts ``STABLE``
+immediately once XOSC is enabled and awake, keeps ``BADWRITE`` sticky until
+cleared, and implements the documented ``STARTUP``, ``DORMANT`` and
+``COUNT`` registers at the level needed by early boot.
 
 RP2040 flash and XIP model
 --------------------------
@@ -193,4 +215,5 @@ Known limitations
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.
  * USB, PIO, DMA, watchdog, reset controller and most peripherals are not yet
-   implemented.
+   implemented.  The current real mask ROM blocker is the reset controller's
+   ``RESET_DONE`` state.

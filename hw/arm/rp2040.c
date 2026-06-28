@@ -17,7 +17,6 @@
 #include "qemu/datadir.h"
 #include "target/arm/cpu-qom.h"
 
-#define RP2040_SYSCLK_FRQ 125000000
 #define RP2040_UART0_BASE 0x40034000
 #define RP2040_UART0_IRQ  20
 
@@ -49,14 +48,12 @@ static const struct {
 } rp2040_unimplemented[] = {
     { "rp2040.sysinfo",  0x40000000, 0x4000 },
     { "rp2040.syscfg",   0x40004000, 0x4000 },
-    { "rp2040.clocks",   0x40008000, 0x4000 },
     { "rp2040.resets",   0x4000c000, 0x4000 },
     { "rp2040.psm",      0x40010000, 0x4000 },
     { "rp2040.iobank0",  0x40014000, 0x4000 },
     { "rp2040.ioqspi",   0x40018000, 0x4000 },
     { "rp2040.padsbank0", 0x4001c000, 0x4000 },
     { "rp2040.padsqspi", 0x40020000, 0x4000 },
-    { "rp2040.xosc",     0x40024000, 0x4000 },
     { "rp2040.pll_sys",  0x40028000, 0x4000 },
     { "rp2040.pll_usb",  0x4002c000, 0x4000 },
     { "rp2040.busctrl",  0x40030000, 0x4000 },
@@ -94,9 +91,10 @@ static void rp2040_soc_init(Object *obj)
     object_property_add_alias(obj, "serial0", OBJECT(&s->uart0), "chardev");
 
     object_initialize_child(obj, "xip", &s->xip, TYPE_RP2040_XIP);
+    object_initialize_child(obj, "clocks", &s->clocks, TYPE_RP2040_CLOCKS);
+    object_initialize_child(obj, "xosc", &s->xosc, TYPE_RP2040_XOSC);
 
     s->sysclk = clock_new(obj, "sysclk");
-    clock_set_hz(s->sysclk, RP2040_SYSCLK_FRQ);
 }
 
 static void rp2040_soc_realize(DeviceState *dev, Error **errp)
@@ -143,6 +141,18 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 1, RP2040_XIP_CTRL_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 2, RP2040_XIP_SSI_BASE);
 
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->clocks), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->clocks), 0, RP2040_CLOCKS_BASE);
+    clock_set_source(s->sysclk, qdev_get_clock_out(DEVICE(&s->clocks),
+                                                   "clk-sys"));
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->xosc), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->xosc), 0, RP2040_XOSC_BASE);
+
     for (i = 0; i < 4; i++) {
         g_autofree char *name = g_strdup_printf("rp2040.sram%d", i);
 
@@ -188,7 +198,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    qdev_connect_clock_in(DEVICE(&s->uart0), "clk", s->sysclk);
+    qdev_connect_clock_in(DEVICE(&s->uart0), "clk",
+                          qdev_get_clock_out(DEVICE(&s->clocks), "clk-peri"));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->uart0), errp)) {
         return;
     }
