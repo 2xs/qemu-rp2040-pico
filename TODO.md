@@ -35,7 +35,9 @@ Current RFC integration status:
   debug the extra RP2040 blocks the real ROM requires.
 - Mask ROM bring-up tracing is available with `-d unimp,guest_errors` and
   logs named RP2040 MMIO accesses, including absolute addresses. The first
-  observed blocker is repeated polling of `rp2040.clocks` at `0x40008044`.
+  observed blocker, repeated polling of `rp2040.clocks` at `0x40008044`, is
+  resolved by the minimal clock model. The current blocker is repeated polling
+  of `rp2040.resets` at `0x4000c008`.
 
 ## Phase 0: Baseline
 
@@ -142,9 +144,13 @@ Current mask ROM trace finding:
 - With a raw flash probe image, the real ROM starts at reset vector `0x000000ef`.
 - Early accesses touch `sio`, `clocks`, `syscfg`, `vreg_and_chip_reset`,
   `watchdog`, `resets`, `tbman`, and `rosc`.
-- The first tight polling loop is on `clocks` offset `0x44`
-  (`0x40008044`), which currently reads as zero from the unimplemented clock
-  block.
+- The first tight polling loop was on `clocks` offset `0x44`
+  (`0x40008044`). This now completes with the minimal clock model.
+- The ROM then enables XOSC and polls `xosc` offset `0x04`
+  (`0x40024004`). This now completes with the minimal XOSC model.
+- The current tight polling loop is on `resets` offset `0x08`
+  (`0x4000c008`), which corresponds to reset-done state and is the next
+  boot-ROM bring-up target.
 
 ## Phase 6: Minimal UART0 Console
 
@@ -232,11 +238,32 @@ Current flash command model note:
 
 ## Phase 12: Minimal Clock, Reset, Watchdog, and Timer Stubs
 
-- [ ] Identify which registers the initial test firmware actually touches.
-- [ ] Add minimal clock/reset/watchdog/timer behavior only when needed.
-- [ ] Return documented constant values for simple read-only stubs.
-- [ ] Avoid claiming full RP2040 fidelity.
+- [x] Identify which clock/XOSC registers the RFC mask ROM polls first.
+- [x] Add a minimal RP2040 clocks device for clock generator registers needed
+  by early boot.
+- [x] Add a minimal RP2040 XOSC device with documented reset, enable,
+  bad-write, dormant, startup, count and stable-status behavior.
+- [x] Move CPU and UART clock wiring onto QEMU `Clock` outputs from the
+  RP2040 clock model.
+- [x] Avoid claiming full RP2040 clock fidelity.
+- [ ] Add a minimal reset-controller model for `RESET_DONE`.
+- [ ] Add minimal watchdog/timer behavior only when needed by boot ROM or
+  firmware tests.
 - [ ] Add regression tests for any behavior required by firmware boot.
+
+Current clock/reset bring-up note:
+
+- The RP2040 clock model follows QEMU's `Clock` framework: registers update
+  stable clock output frequencies, while guest time and instruction execution
+  remain managed by QEMU's existing virtual clock machinery.
+- `CLK_*_SELECTED` returns stable one-hot values immediately instead of
+  modeling glitchless mux transition latency.
+- XOSC follows the datasheet-visible programming model: reset-disabled,
+  enable code `0xfab`, disable code `0xd1e`, `BADWRITE` sticky until cleared,
+  and `STABLE` asserted immediately once enabled and awake.
+- The RFC `pipico.rom` no longer blocks on `CLK_SYS_SELECTED` or XOSC
+  `STATUS_STABLE`. It now blocks on the reset controller's `RESET_DONE`
+  register at `0x4000c008`.
 
 ## Phase 13: Documentation
 
