@@ -38,7 +38,8 @@ Current RFC integration status:
   observed blocker, repeated polling of `rp2040.clocks` at `0x40008044`, is
   resolved by the minimal clock model. The later blocker on `rp2040.resets`
   at `0x4000c008` is resolved by the minimal reset controller. The current
-  blocker is repeated polling of `rp2040.pll_sys` at `0x40028000`.
+  blocker is a HardFault on access to `0x14003000`, after `PLL_SYS` lock
+  polling completes.
 
 ## Phase 0: Baseline
 
@@ -151,9 +152,12 @@ Current mask ROM trace finding:
   (`0x40024004`). This now completes with the minimal XOSC model.
 - The ROM then polls `resets` offset `0x08` (`0x4000c008`) for reset-done
   state. This now completes with the minimal reset controller.
-- The current tight polling loop is on `pll_sys` offset `0x00`
-  (`0x40028000`), after writes to `CS`, `FBDIV_INT`, `PRIM`, and the atomic
-  alias for `PWR`.
+- The ROM then polls `pll_sys` offset `0x00` (`0x40028000`), after writes
+  to `CS`, `FBDIV_INT`, `PRIM`, and the atomic alias for `PWR`.
+- This PLL lock loop now completes with the minimal PLL model. The ROM then
+  switches `clk_sys` to the PLL path, touches watchdog scratch registers, and
+  faults on an access to `0x14003000`. This is the next bring-up target and
+  likely belongs to the XIP alias/cache view rather than to PLL setup.
 
 ## Phase 6: Minimal UART0 Console
 
@@ -250,6 +254,7 @@ Current flash command model note:
   RP2040 clock model.
 - [x] Avoid claiming full RP2040 clock fidelity.
 - [x] Add a minimal reset-controller model for `RESET_DONE`.
+- [x] Add minimal PLL_SYS/PLL_USB register models for `CS.LOCK` polling.
 - [ ] Add minimal watchdog/timer behavior only when needed by boot ROM or
   firmware tests.
 - [ ] Add regression tests for any behavior required by firmware boot.
@@ -270,8 +275,16 @@ Current clock/reset bring-up note:
   resets all documented blocks at QEMU reset, `WDSEL` is stored, and
   `RESET_DONE` is derived immediately as `~RESET` for bits 0..24, without
   modeling reset propagation delay.
-- The RFC `pipico.rom` no longer blocks on `RESET_DONE`; it now blocks on
-  `pll_sys` offset `0x00` (`0x40028000`).
+- The RFC `pipico.rom` no longer blocks on `RESET_DONE` or `pll_sys` offset
+  `0x00` (`0x40028000`).
+- The PLL model is intentionally shallow: it stores `CS`, `PWR`,
+  `FBDIV_INT`, and `PRIM`, applies the RP2040 atomic aliases, reports
+  `CS.LOCK` immediately when the PLL is powered, and publishes a calculated
+  QEMU `Clock` output. The current RP2040 clock generator still uses fixed
+  PLL_SYS/PLL_USB frequencies, so the PLL model does not yet affect CPU
+  execution speed or clock mux output.
+- The RFC `pipico.rom` no longer blocks on `PLL_SYS` lock. It now reaches a
+  HardFault on `0x14003000`, after watchdog scratch writes.
 
 ## Phase 13: Documentation
 
