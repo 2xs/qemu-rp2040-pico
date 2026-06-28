@@ -8,6 +8,19 @@ on the RP2040 microcontroller.  The current model is intended for bare-metal
 bring-up and tests that execute code from the RP2040 external flash XIP
 window.
 
+RFC lineage
+-----------
+
+This machine starts from Alex Bennee's 2022 RP2040/Pico RFC patch series.
+The RP2040 SoC skeleton, Pico machine, and memory map are adapted from that
+series to the current QEMU tree.  The RFC ``pc-bios/pipico.rom`` image is
+kept in the tree for bring-up experiments.
+
+The active boot path is not yet the RFC mask ROM path.  QEMU currently uses a
+small synthetic boot ROM to enter a raw image in the XIP window, while the
+RFC mask ROM loading logic remains the next compatibility step to integrate
+or adapt and debug against the minimal RP2040 model.
+
 Supported devices
 -----------------
 
