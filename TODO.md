@@ -121,14 +121,21 @@ Current automated test note:
 
 ## Phase 8: XIP Flash Backing
 
-- [ ] Replace the first simple XIP ROM region if needed.
-- [ ] Model the default erased state as `0xff`.
-- [ ] Keep the default flash size at `2 MiB`.
-- [ ] Add a raw host backing file option or board property.
-- [ ] Load initial flash contents from the raw file.
-- [ ] Map the flash contents executable at `0x10000000`.
-- [ ] Verify guest reads from XIP see the raw file contents.
-- [ ] Verify firmware still executes from XIP.
+- [x] Replace the first simple XIP ROM region if needed.
+- [x] Model the default erased state as `0xff`.
+- [x] Keep the default flash size at `2 MiB`.
+- [x] Add a raw host backing file option or board property.
+- [x] Load initial flash contents from the raw file.
+- [x] Map the flash contents executable at `0x10000000`.
+- [x] Verify guest reads from XIP see the raw file contents.
+- [x] Verify firmware still executes from XIP.
+
+Current XIP backing note:
+
+- `raspi-pico` exposes `flash-file=/path/to/flash.bin` as a raw initial XIP
+  image. Missing bytes are initialized to erased NOR state, `0xff`.
+- The region is still read-only from the guest. Programming, erase, writeback,
+  and persistence are intentionally deferred to later phases.
 
 ## Phase 9: Minimal Flash Programming Model
 
