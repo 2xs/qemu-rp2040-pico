@@ -13,6 +13,7 @@
 #include "hw/char/pl011.h"
 #include "hw/core/clock.h"
 #include "hw/core/sysbus.h"
+#include "hw/ssi/rp2040_xip.h"
 #include "qom/object.h"
 
 #define TYPE_RP2040 "rp2040"
@@ -33,6 +34,7 @@ struct RP2040State {
 
     ARMv7MState armv7m;
     PL011State uart0;
+    RP2040XipState xip;
 
     MemoryRegion *board_memory;
     MemoryRegion rom;

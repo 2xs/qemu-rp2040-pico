@@ -1,0 +1,545 @@
+/*
+ * RP2040 XIP/SSI flash controller emulation
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
+#include "qemu/osdep.h"
+#include "qemu/units.h"
+#include "qapi/error.h"
+#include "exec/memattrs.h"
+#include "hw/core/qdev-properties.h"
+#include "hw/core/loader.h"
+#include "hw/ssi/rp2040_xip.h"
+
+#define RP2040_XIP_CTRL_EN           0x1
+#define RP2040_XIP_CTRL_ERR_BADWRITE 0x2
+#define RP2040_XIP_STAT_FLUSH_READY  0x1
+#define RP2040_XIP_STAT_FIFO_EMPTY   0x2
+
+#define RP2040_SSI_CTRLR0     0x00
+#define RP2040_SSI_CTRLR1     0x04
+#define RP2040_SSI_SSIENR     0x08
+#define RP2040_SSI_SER        0x10
+#define RP2040_SSI_BAUDR      0x14
+#define RP2040_SSI_TXFTLR     0x18
+#define RP2040_SSI_RXFTLR     0x1c
+#define RP2040_SSI_TXFLR      0x20
+#define RP2040_SSI_RXFLR      0x24
+#define RP2040_SSI_SR         0x28
+#define RP2040_SSI_IMR        0x2c
+#define RP2040_SSI_ISR        0x30
+#define RP2040_SSI_RISR       0x34
+#define RP2040_SSI_DMACR      0x4c
+#define RP2040_SSI_DMATDLR    0x50
+#define RP2040_SSI_DMARDLR    0x54
+#define RP2040_SSI_IDR        0x58
+#define RP2040_SSI_VERSION_ID 0x5c
+#define RP2040_SSI_DR0        0x60
+#define RP2040_SSI_DR_END     0xec
+#define RP2040_SSI_SPI_CTRLR0 0xf4
+
+#define RP2040_SSI_SR_BUSY 0x01
+#define RP2040_SSI_SR_TFNF 0x02
+#define RP2040_SSI_SR_TFE  0x04
+#define RP2040_SSI_SR_RFNE 0x08
+#define RP2040_SSI_SR_RFF  0x10
+
+#define FLASH_CMD_READ         0x03
+#define FLASH_CMD_PAGE_PROGRAM 0x02
+#define FLASH_CMD_READ_STATUS  0x05
+#define FLASH_CMD_WRITE_ENABLE 0x06
+#define FLASH_CMD_SECTOR_ERASE 0x20
+
+#define FLASH_STATUS_WIP 0x01
+#define FLASH_STATUS_WEL 0x02
+#define FLASH_PAGE_SIZE  256
+#define FLASH_SECTOR_SIZE 4096
+
+static void rp2040_xip_rx_clear(RP2040XipState *s)
+{
+    s->rx_len = 0;
+    s->rx_pos = 0;
+}
+
+static void rp2040_xip_rx_push(RP2040XipState *s, uint8_t value)
+{
+    if (s->rx_len < ARRAY_SIZE(s->rx)) {
+        s->rx[s->rx_len++] = value;
+    }
+}
+
+static uint8_t rp2040_xip_status(RP2040XipState *s)
+{
+    uint8_t status = 0;
+
+    if (s->busy) {
+        status |= FLASH_STATUS_WIP;
+    }
+    if (s->write_enable) {
+        status |= FLASH_STATUS_WEL;
+    }
+
+    return status;
+}
+
+static uint32_t rp2040_xip_tx_addr(RP2040XipState *s)
+{
+    return (uint32_t)s->tx[1] << 16 | s->tx[2] << 8 | s->tx[3];
+}
+
+static void rp2040_xip_finish_busy(RP2040XipState *s)
+{
+    s->busy = false;
+}
+
+static void rp2040_xip_reset_tx(RP2040XipState *s)
+{
+    s->tx_len = 0;
+}
+
+static void rp2040_xip_program(RP2040XipState *s)
+{
+    uint32_t addr;
+    uint32_t page_end;
+    unsigned data_len;
+    unsigned i;
+
+    if (!s->write_enable) {
+        return;
+    }
+
+    s->write_enable = false;
+
+    if (s->tx_len <= 4) {
+        return;
+    }
+
+    addr = rp2040_xip_tx_addr(s);
+    if (addr >= s->flash_size) {
+        return;
+    }
+
+    page_end = ROUND_UP(addr + 1, FLASH_PAGE_SIZE);
+    data_len = MIN(s->tx_len - 4, page_end - addr);
+    data_len = MIN(data_len, s->flash_size - addr);
+
+    for (i = 0; i < data_len; i++) {
+        s->storage[addr + i] &= s->tx[4 + i];
+    }
+
+    s->busy = true;
+}
+
+static void rp2040_xip_erase(RP2040XipState *s)
+{
+    uint32_t addr;
+    uint32_t base;
+
+    if (!s->write_enable) {
+        return;
+    }
+
+    s->write_enable = false;
+
+    if (s->tx_len < 4) {
+        return;
+    }
+
+    addr = rp2040_xip_tx_addr(s);
+    base = QEMU_ALIGN_DOWN(addr, FLASH_SECTOR_SIZE);
+    if (base >= s->flash_size) {
+        return;
+    }
+
+    memset(&s->storage[base], 0xff, MIN(FLASH_SECTOR_SIZE,
+                                       s->flash_size - base));
+    s->busy = true;
+}
+
+static void rp2040_xip_finish_command(RP2040XipState *s)
+{
+    if (s->tx_len == 0) {
+        return;
+    }
+
+    switch (s->tx[0]) {
+    case FLASH_CMD_PAGE_PROGRAM:
+        rp2040_xip_program(s);
+        break;
+    case FLASH_CMD_SECTOR_ERASE:
+        rp2040_xip_erase(s);
+        break;
+    default:
+        break;
+    }
+
+    rp2040_xip_reset_tx(s);
+}
+
+static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
+{
+    uint32_t addr;
+
+    if (s->tx_len < ARRAY_SIZE(s->tx)) {
+        s->tx[s->tx_len++] = value;
+    }
+
+    switch (s->tx[0]) {
+    case FLASH_CMD_WRITE_ENABLE:
+        s->write_enable = true;
+        rp2040_xip_reset_tx(s);
+        break;
+    case FLASH_CMD_READ_STATUS:
+        rp2040_xip_rx_push(s, rp2040_xip_status(s));
+        rp2040_xip_finish_busy(s);
+        rp2040_xip_reset_tx(s);
+        break;
+    case FLASH_CMD_READ:
+        if (s->tx_len >= 4) {
+            addr = rp2040_xip_tx_addr(s) + s->tx_len - 4;
+            rp2040_xip_rx_push(s, addr < s->flash_size ?
+                               s->storage[addr] : 0xff);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static MemTxResult rp2040_xip_read(void *opaque, hwaddr addr, uint64_t *data,
+                                   unsigned size, MemTxAttrs attrs)
+{
+    RP2040XipState *s = opaque;
+    uint64_t value = 0;
+    unsigned i;
+
+    if (s->busy || addr + size > s->flash_size) {
+        return MEMTX_ERROR;
+    }
+
+    for (i = 0; i < size; i++) {
+        value |= (uint64_t)s->storage[addr + i] << (i * 8);
+    }
+    *data = value;
+    return MEMTX_OK;
+}
+
+static MemTxResult rp2040_xip_write(void *opaque, hwaddr addr, uint64_t data,
+                                    unsigned size, MemTxAttrs attrs)
+{
+    RP2040XipState *s = opaque;
+    unsigned i;
+
+    if (!s->xip_writable) {
+        return MEMTX_ERROR;
+    }
+    if (addr + size > s->flash_size) {
+        return MEMTX_ERROR;
+    }
+
+    for (i = 0; i < size; i++) {
+        s->storage[addr + i] = extract64(data, i * 8, 8);
+    }
+    return MEMTX_OK;
+}
+
+static uint64_t rp2040_xip_ctrl_read(void *opaque, hwaddr addr, unsigned size)
+{
+    RP2040XipState *s = opaque;
+
+    switch (addr) {
+    case 0x00:
+        return s->xip_ctrl;
+    case 0x04:
+        return 0;
+    case 0x08:
+        return RP2040_XIP_STAT_FLUSH_READY | RP2040_XIP_STAT_FIFO_EMPTY;
+    default:
+        return 0;
+    }
+}
+
+static void rp2040_xip_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
+                                  unsigned size)
+{
+    RP2040XipState *s = opaque;
+
+    switch (addr) {
+    case 0x00:
+        s->xip_ctrl = value & (RP2040_XIP_CTRL_EN |
+                               RP2040_XIP_CTRL_ERR_BADWRITE);
+        break;
+    case 0x0c:
+    case 0x10:
+        break;
+    default:
+        break;
+    }
+}
+
+static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
+{
+    RP2040XipState *s = opaque;
+    uint8_t value;
+    uint32_t risr = s->rx_len > s->rx_pos ? 0 : 1;
+
+    if (addr >= RP2040_SSI_DR0 && addr <= RP2040_SSI_DR_END) {
+        if (s->rx_pos < s->rx_len) {
+            value = s->rx[s->rx_pos++];
+            if (s->rx_pos == s->rx_len) {
+                rp2040_xip_rx_clear(s);
+            }
+            return value;
+        }
+        return 0;
+    }
+
+    switch (addr) {
+    case RP2040_SSI_CTRLR0:
+        return s->ctrlr0;
+    case RP2040_SSI_CTRLR1:
+        return s->ctrlr1;
+    case RP2040_SSI_SSIENR:
+        return s->ssienr;
+    case RP2040_SSI_SER:
+        return s->ser;
+    case RP2040_SSI_BAUDR:
+        return s->baudr;
+    case RP2040_SSI_TXFTLR:
+        return s->txftlr;
+    case RP2040_SSI_RXFTLR:
+        return s->rxftlr;
+    case RP2040_SSI_TXFLR:
+        return 0;
+    case RP2040_SSI_RXFLR:
+        return s->rx_len - s->rx_pos;
+    case RP2040_SSI_SR:
+        return RP2040_SSI_SR_TFE | RP2040_SSI_SR_TFNF |
+               (s->busy ? RP2040_SSI_SR_BUSY : 0) |
+               (s->rx_len > s->rx_pos ? RP2040_SSI_SR_RFNE : 0) |
+               (s->rx_len - s->rx_pos == ARRAY_SIZE(s->rx) ?
+                RP2040_SSI_SR_RFF : 0);
+    case RP2040_SSI_IMR:
+        return s->imr;
+    case RP2040_SSI_ISR:
+    case RP2040_SSI_RISR:
+        return risr;
+    case RP2040_SSI_DMACR:
+    case RP2040_SSI_DMATDLR:
+        return 0;
+    case RP2040_SSI_DMARDLR:
+        return 4;
+    case RP2040_SSI_IDR:
+        return 0;
+    case RP2040_SSI_VERSION_ID:
+        return 0x3430312a;
+    case RP2040_SSI_SPI_CTRLR0:
+        return s->spi_ctrlr0;
+    default:
+        return 0;
+    }
+}
+
+static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
+                                 unsigned size)
+{
+    RP2040XipState *s = opaque;
+    uint32_t old_ser = s->ser;
+
+    if (addr >= RP2040_SSI_DR0 && addr <= RP2040_SSI_DR_END) {
+        rp2040_xip_dr_write(s, value & 0xff);
+        return;
+    }
+
+    switch (addr) {
+    case RP2040_SSI_CTRLR0:
+        s->ctrlr0 = value;
+        break;
+    case RP2040_SSI_CTRLR1:
+        s->ctrlr1 = value;
+        break;
+    case RP2040_SSI_SSIENR:
+        s->ssienr = value & 1;
+        if (!s->ssienr) {
+            rp2040_xip_rx_clear(s);
+            rp2040_xip_reset_tx(s);
+        }
+        break;
+    case RP2040_SSI_SER:
+        s->ser = value & 1;
+        if ((old_ser & 1) && !s->ser) {
+            rp2040_xip_finish_command(s);
+        }
+        break;
+    case RP2040_SSI_BAUDR:
+        s->baudr = value & 0xffff;
+        break;
+    case RP2040_SSI_TXFTLR:
+        s->txftlr = value & 0xff;
+        break;
+    case RP2040_SSI_RXFTLR:
+        s->rxftlr = value & 0xff;
+        break;
+    case RP2040_SSI_IMR:
+        s->imr = value & 0x3f;
+        break;
+    case RP2040_SSI_SPI_CTRLR0:
+        s->spi_ctrlr0 = value;
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps rp2040_xip_ops = {
+    .read_with_attrs = rp2040_xip_read,
+    .write_with_attrs = rp2040_xip_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 4,
+        .unaligned = true,
+    },
+};
+
+static const MemoryRegionOps rp2040_xip_ctrl_ops = {
+    .read = rp2040_xip_ctrl_read,
+    .write = rp2040_xip_ctrl_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 4,
+        .max_access_size = 4,
+    },
+};
+
+static const MemoryRegionOps rp2040_xip_ssi_ops = {
+    .read = rp2040_xip_ssi_read,
+    .write = rp2040_xip_ssi_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 4,
+        .unaligned = true,
+    },
+};
+
+void rp2040_xip_set_writable(RP2040XipState *s, bool writable)
+{
+    s->xip_writable = writable;
+}
+
+void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
+                           Error **errp)
+{
+    ssize_t image_size;
+
+    if (!filename) {
+        return;
+    }
+
+    image_size = load_image_size(filename, s->storage, s->flash_size);
+    if (image_size < 0) {
+        error_setg(errp, "could not load flash image '%s'", filename);
+    }
+}
+
+static void rp2040_xip_realize(DeviceState *dev, Error **errp)
+{
+    RP2040XipState *s = RP2040_XIP(dev);
+    g_autofree gchar *contents = NULL;
+    gsize contents_len = 0;
+
+    if (s->flash_size == 0) {
+        error_setg(errp, "flash-size must be non-zero");
+        return;
+    }
+
+    s->xip_writable = true;
+    s->storage = g_malloc0(s->flash_size);
+    memset(s->storage, 0xff, s->flash_size);
+
+    if (s->flash_file) {
+        if (!g_file_get_contents(s->flash_file, &contents, &contents_len,
+                                 NULL)) {
+            error_setg(errp, "could not load flash file '%s'",
+                       s->flash_file);
+            return;
+        }
+        if (contents_len > s->flash_size) {
+            error_setg(errp, "flash file '%s' is %" G_GSIZE_FORMAT
+                       " bytes, larger than %" G_GSIZE_FORMAT
+                       " byte Pico flash",
+                       s->flash_file, contents_len, (gsize)s->flash_size);
+            return;
+        }
+        memcpy(s->storage, contents, contents_len);
+    }
+
+    memory_region_init_io(&s->xip, OBJECT(dev), &rp2040_xip_ops, s,
+                          "rp2040.xip", s->flash_size);
+    memory_region_init_io(&s->ctrl, OBJECT(dev), &rp2040_xip_ctrl_ops, s,
+                          "rp2040.xip.ctrl", RP2040_XIP_CTRL_SIZE);
+    memory_region_init_io(&s->ssi, OBJECT(dev), &rp2040_xip_ssi_ops, s,
+                          "rp2040.xip.ssi", RP2040_XIP_SSI_SIZE);
+
+    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->xip);
+    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->ctrl);
+    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->ssi);
+}
+
+static void rp2040_xip_reset(DeviceState *dev)
+{
+    RP2040XipState *s = RP2040_XIP(dev);
+
+    s->xip_ctrl = RP2040_XIP_CTRL_EN | RP2040_XIP_CTRL_ERR_BADWRITE;
+    s->ctrlr0 = 0;
+    s->ctrlr1 = 0;
+    s->ssienr = 0;
+    s->ser = 0;
+    s->baudr = 0;
+    s->txftlr = 0;
+    s->rxftlr = 0;
+    s->imr = 0;
+    s->spi_ctrlr0 = 0;
+    s->write_enable = false;
+    s->busy = false;
+    rp2040_xip_reset_tx(s);
+    rp2040_xip_rx_clear(s);
+}
+
+static void rp2040_xip_finalize(Object *obj)
+{
+    RP2040XipState *s = RP2040_XIP(obj);
+
+    g_free(s->flash_file);
+    g_free(s->storage);
+}
+
+static const Property rp2040_xip_properties[] = {
+    DEFINE_PROP_UINT32("flash-size", RP2040XipState, flash_size, 2 * MiB),
+    DEFINE_PROP_STRING("flash-file", RP2040XipState, flash_file),
+};
+
+static void rp2040_xip_class_init(ObjectClass *klass, const void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+
+    dc->realize = rp2040_xip_realize;
+    device_class_set_legacy_reset(dc, rp2040_xip_reset);
+    device_class_set_props(dc, rp2040_xip_properties);
+}
+
+static const TypeInfo rp2040_xip_info = {
+    .name          = TYPE_RP2040_XIP,
+    .parent        = TYPE_SYS_BUS_DEVICE,
+    .instance_size = sizeof(RP2040XipState),
+    .instance_finalize = rp2040_xip_finalize,
+    .class_init    = rp2040_xip_class_init,
+};
+
+static void rp2040_xip_register_types(void)
+{
+    type_register_static(&rp2040_xip_info);
+}
+type_init(rp2040_xip_register_types)

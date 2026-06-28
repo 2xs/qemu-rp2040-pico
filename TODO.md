@@ -139,24 +139,32 @@ Current XIP backing note:
 
 ## Phase 9: Minimal Flash Programming Model
 
-- [ ] Decide where the command model belongs: SSI/QSPI controller, flash device, or temporary board-level model.
-- [ ] Implement write enable.
-- [ ] Implement read status.
-- [ ] Implement page program with 256-byte pages.
-- [ ] Implement sector erase with 4096-byte sectors.
-- [ ] Enforce NOR programming as `old & new`.
-- [ ] Reject or document unsupported commands.
-- [ ] Define behavior for out-of-range erase/program requests.
-- [ ] Add tests for successful erase/program/readback.
+- [x] Decide where the command model belongs: SSI/QSPI controller, flash device, or temporary board-level model.
+- [x] Implement write enable.
+- [x] Implement read status.
+- [x] Implement page program with 256-byte pages.
+- [x] Implement sector erase with 4096-byte sectors.
+- [x] Enforce NOR programming as `old & new`.
+- [x] Reject or document unsupported commands.
+- [x] Define behavior for out-of-range erase/program requests.
+- [x] Add tests for successful erase/program/readback.
 - [ ] Add tests for programming without write enable.
 - [ ] Add tests for attempting to change bits from `0` back to `1` without erase.
 
+Current flash command model note:
+
+- The command model lives in a minimal RP2040 XIP/SSI device, mapped at the
+  XIP window, XIP control base, and `XIP_SSI_BASE`.
+- Unsupported commands are ignored.
+- Out-of-range erase/program commands have no effect. If they consumed write
+  enable state, write enable is cleared and the flash does not become busy.
+
 ## Phase 10: Flash Busy and XIP Access Semantics
 
-- [ ] Decide the behavior for XIP reads while flash is busy.
-- [ ] Document the chosen behavior.
-- [ ] Implement the chosen behavior.
-- [ ] Add a test for XIP access while busy if busy timing/state is modeled.
+- [x] Decide the behavior for XIP reads while flash is busy.
+- [x] Document the chosen behavior.
+- [x] Implement the chosen behavior.
+- [x] Add a test for XIP access while busy if busy timing/state is modeled.
 
 ## Phase 11: Flash Persistence
 

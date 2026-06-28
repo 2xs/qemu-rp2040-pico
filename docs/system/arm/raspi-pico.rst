@@ -20,7 +20,7 @@ Supported devices
 Boot options
 ------------
 
-For direct bring-up, firmware can be loaded into the XIP window with
+For direct bring-up, a raw firmware image can be loaded into the XIP window with
 ``-kernel``:
 
 .. code-block:: bash
@@ -82,6 +82,11 @@ The flash contents follow NOR semantics:
  * programming can only clear bits, equivalent to ``old & new``;
  * page program is limited to 256-byte pages;
  * sector erase operates on 4096-byte sectors.
+
+Unsupported flash commands are currently ignored.  Out-of-range page program
+and sector erase commands have no effect.  If such a command consumed write
+enable state, the emulation clears write enable and does not enter the busy
+state.
 
 The datasheet notes that software must consider XIP cache coherence around
 flash programming operations, and describes ROM routines that reconfigure the
