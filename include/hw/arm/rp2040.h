@@ -14,6 +14,7 @@
 #include "hw/core/clock.h"
 #include "hw/core/sysbus.h"
 #include "hw/misc/rp2040_clocks.h"
+#include "hw/misc/rp2040_resets.h"
 #include "hw/misc/rp2040_xosc.h"
 #include "hw/ssi/rp2040_xip.h"
 #include "qom/object.h"
@@ -37,6 +38,7 @@ struct RP2040State {
     ARMv7MState armv7m;
     PL011State uart0;
     RP2040ClocksState clocks;
+    RP2040ResetsState resets;
     RP2040XoscState xosc;
     RP2040XipState xip;
 
