@@ -126,10 +126,9 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
             return;
         }
 
-        image_size = load_image_mr(filename, &s->rom);
+        image_size = load_image_targphys(filename, RP2040_ROM_BASE,
+                                         RP2040_ROM_SIZE, errp);
         if (image_size < 0) {
-            error_setg(errp, "could not load RP2040 boot ROM image '%s'",
-                       filename);
             return;
         }
     } else {

@@ -33,6 +33,9 @@ Current RFC integration status:
   current model keeps a synthetic boot ROM so direct XIP tests remain stable;
   the next boot-ROM step is to integrate or adapt the RFC mask ROM loading and
   debug the extra RP2040 blocks the real ROM requires.
+- Mask ROM bring-up tracing is available with `-d unimp,guest_errors` and
+  logs named RP2040 MMIO accesses, including absolute addresses. The first
+  observed blocker is repeated polling of `rp2040.clocks` at `0x40008044`.
 
 ## Phase 0: Baseline
 
@@ -127,10 +130,21 @@ Current boot ROM strategy note:
 - The RFC ROM image is present locally and listed with the QEMU BIOS blobs.
 - A ROM image can be supplied explicitly with `-bios`, and is resolved through
   QEMU's BIOS search path.
+- `-bios pipico.rom` now loads through QEMU's ROM loader so the Cortex-M reset
+  path sees the boot ROM vector table correctly.
 - The active boot path is still the synthetic boot ROM described in phase 4.
 - The RFC mask ROM loader from patch 0005 should be integrated or adapted next
   behind a deliberate boot-ROM policy, then debugged against the minimal SoC
   model instead of discarded.
+
+Current mask ROM trace finding:
+
+- With a raw flash probe image, the real ROM starts at reset vector `0x000000ef`.
+- Early accesses touch `sio`, `clocks`, `syscfg`, `vreg_and_chip_reset`,
+  `watchdog`, `resets`, `tbman`, and `rosc`.
+- The first tight polling loop is on `clocks` offset `0x44`
+  (`0x40008044`), which currently reads as zero from the unimplemented clock
+  block.
 
 ## Phase 6: Minimal UART0 Console
 

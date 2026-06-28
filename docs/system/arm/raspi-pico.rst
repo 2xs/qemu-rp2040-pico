@@ -63,6 +63,28 @@ does not yet provide all hardware behaviour needed by the real mask ROM boot
 flow.  If ``-bios`` is omitted, QEMU keeps using the synthetic boot ROM
 described above.
 
+Mask ROM bring-up tracing
+-------------------------
+
+The real mask ROM path can be explored with QEMU's unimplemented-device log:
+
+.. code-block:: bash
+
+  $ qemu-system-arm -machine raspi-pico,flash-file=flash.bin \
+      -bios pipico.rom -display none -serial none \
+      -d unimp,guest_errors -D rp2040-bios-mmio.log
+
+The RP2040 model names unimplemented MMIO blocks in the log and includes the
+absolute address, register offset, access size and write value.  The XIP/SSI
+register block also logs APB register accesses through the same ``unimp`` log
+mask, without logging every normal XIP instruction fetch.
+
+At the current level of emulation, the RFC ``pipico.rom`` image reaches its
+reset handler and then blocks in early clock setup.  The first tight polling
+loop observed is a repeated read from ``rp2040.clocks`` offset ``0x44``
+(``0x40008044``), which currently returns zero because the clock block is only
+stubbed.
+
 RP2040 flash and XIP model
 --------------------------
 
