@@ -83,6 +83,7 @@ Current temporary boot behavior:
 - [ ] Review `/tmp/rp2040-rfc-patches/0004-pc-bios-add-pipico-mask-rom-upstream.patch`.
 - [ ] Review `/tmp/rp2040-rfc-patches/0005-hw-arm-add-mask-boot-ROM-logic.patch`.
 - [ ] Do not import the extracted binary `pc-bios/pipico.rom` as-is for an upstreamable path.
+- [x] Copy the RFC `pc-bios/pipico.rom` image locally so it is available for bring-up experiments.
 - [x] Decide whether the initial implementation uses an empty/simplified ROM or requires a user-supplied ROM.
 - [ ] If using a ROM image, make loading optional and document the file name and search path.
 - [x] If using a simplified ROM, document exactly what it does and does not emulate.
@@ -104,14 +105,19 @@ Current temporary boot behavior:
 
 ## Phase 7: First Automated Test
 
-- [ ] Choose the test framework: prefer `tests/functional` for a full-system boot test.
-- [ ] Add or reference a tiny UART hello-world firmware fixture.
-- [ ] Add a test that launches `qemu-system-arm -machine raspi-pico`.
-- [ ] Load the firmware with `-kernel`.
-- [ ] Wait for the expected UART text.
-- [ ] Add a timeout that fails clearly on boot hangs.
-- [ ] Run the new test locally.
-- [ ] Ensure the test is skipped cleanly if an optional toolchain or fixture is unavailable.
+- [x] Choose the test framework: prefer `tests/functional` for a full-system boot test.
+- [x] Add or reference a tiny UART hello-world firmware fixture.
+- [x] Add a test that launches `qemu-system-arm -machine raspi-pico`.
+- [x] Load the firmware with `-kernel`.
+- [x] Wait for the expected UART text.
+- [x] Add a timeout that fails clearly on boot hangs.
+- [x] Run the new test locally.
+- [x] Ensure the test is skipped cleanly if an optional toolchain or fixture is unavailable.
+
+Current automated test note:
+
+- The first functional test embeds a tiny raw Cortex-M0+ UART firmware directly
+  in the test source, so no optional toolchain or external fixture is required.
 
 ## Phase 8: XIP Flash Backing
 

@@ -71,6 +71,7 @@ blobs = [
   'skiboot.lid',
   'pnv-pnor.bin',
   'palcode-clipper',
+  'pipico.rom',
   'u-boot.e500',
   'u-boot-sam460.bin',
   'qemu_vga.ndrv',
