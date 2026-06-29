@@ -308,6 +308,9 @@ Current clock/reset bring-up note:
   phase, status, random-bit, and count registers. Its `COUNT` register is
   derived from QEMU virtual time rather than CPU cycles, and the model
   publishes a nominal QEMU `Clock` output.
+- `IO_QSPI` now stores QSPI pin `CTRL` and interrupt registers, returns stable
+  zero pin `STATUS` values, and implements RP2040 atomic aliases. It is an
+  IO-control model only, not a serial flash bus or pad-electrical model.
 - The PLL model is intentionally shallow: it stores `CS`, `PWR`,
   `FBDIV_INT`, and `PRIM`, applies the RP2040 atomic aliases, reports
   `CS.LOCK` immediately when the PLL is powered, and publishes a calculated

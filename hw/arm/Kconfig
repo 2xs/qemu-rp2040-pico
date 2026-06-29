@@ -378,6 +378,7 @@ config RP2040
     select ARM_V7M
     select PL011
     select RP2040_CLOCKS
+    select RP2040_IOQSPI
     select RP2040_PLL
     select RP2040_RESETS
     select RP2040_ROSC

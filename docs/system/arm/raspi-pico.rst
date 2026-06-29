@@ -146,6 +146,14 @@ this follows elapsed host time, while in ``icount`` mode it follows QEMU's
 deterministic virtual clock.  The model does not emulate analog frequency
 variation with process, voltage or temperature.
 
+The QSPI IO bank model implements the documented IO_QSPI register layout for
+the six QSPI pins.  It stores each pin's ``CTRL`` register, returns stable
+zero ``STATUS`` values, implements shallow interrupt enable/force/status
+registers, and supports the RP2040 atomic aliases.  This is enough for boot
+firmware to configure the QSPI pin muxing around the XIP/SSI controller.  It
+does not emulate pad electrical behaviour or serial flash transfers; those
+belong to the pad and XIP/SSI models.
+
 Reset controller model
 ----------------------
 
@@ -314,6 +322,8 @@ Known limitations
  * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
    XIP control and SSI APB register blocks do handle the RP2040 atomic
    ``XOR``/``SET``/``CLR`` aliases.
+ * ``IO_QSPI`` stores pin-control and interrupt registers but does not emulate
+   the electrical QSPI pads or a separate serial bus.
  * The ROSC model exposes stable register behaviour and a nominal clock.  It
    does not model analog frequency variation or true entropy from
    ``RANDOMBIT``.
