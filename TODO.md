@@ -150,7 +150,7 @@ Current mask ROM trace finding:
 
 - With a raw flash probe image, the real ROM starts at reset vector `0x000000ef`.
 - Early accesses touch `sio`, `clocks`, `syscfg`, `vreg_and_chip_reset`,
-  `watchdog`, `resets`, `tbman`, and `rosc`.
+  `watchdog`, `resets`, `tbman`, `rosc`, and later `sysinfo`.
 - The first tight polling loop was on `clocks` offset `0x44`
   (`0x40008044`). This now completes with the minimal clock model.
 - The ROM then enables XOSC and polls `xosc` offset `0x04`
@@ -314,6 +314,17 @@ Current clock/reset bring-up note:
   XIP control alias access. The USB data DPRAM is now backed by RAM and
   `USBCTRL_REGS` stores the registers touched by the boot ROM, including
   atomic aliases. Full USB signaling and packet handling remain future work.
+- `VREG_AND_CHIP_RESET` now exposes shallow `VREG`, `BOD`, and `CHIP_RESET`
+  registers with RP2040 atomic aliases. `VREG.ROK` is reported stable when
+  the regulator is enabled, and watchdog reset cause remains in
+  `WATCHDOG.REASON` rather than `CHIP_RESET`.
+- `SYSINFO` now returns stable `CHIP_ID`, `PLATFORM`, and `GITREF_RP2040`
+  values. `SYSCFG` now stores the documented processor NMI/configuration,
+  input synchronizer bypass, debug-force, and memory-powerdown registers.
+  `PROC0_NMI_MASK` reroutes connected IRQ sources to the Cortex-M0+ NMI input,
+  and `MEMPOWERDOWN` powers off ROM, SRAM bank, and USB DPRAM windows by
+  returning memory transaction errors. `DBGFORCE` remains stored without SWD
+  debug side effects.
 - The watchdog block now models `CTRL`, `LOAD`, `REASON`, `SCRATCH`, and
   `TICK`, schedules a QEMU virtual-time timeout from `clk_ref / TICK.CYCLES`,
   applies the RP2040-E1 double-decrement behavior, and uses QEMU's watchdog

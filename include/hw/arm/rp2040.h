@@ -12,10 +12,14 @@
 #include "hw/arm/armv7m.h"
 #include "hw/char/pl011.h"
 #include "hw/core/clock.h"
+#include "hw/core/irq.h"
 #include "hw/core/sysbus.h"
 #include "hw/misc/rp2040_clocks.h"
 #include "hw/misc/rp2040_pll.h"
 #include "hw/misc/rp2040_resets.h"
+#include "hw/misc/rp2040_syscfg.h"
+#include "hw/misc/rp2040_sysinfo.h"
+#include "hw/misc/rp2040_vreg.h"
 #include "hw/misc/rp2040_watchdog.h"
 #include "hw/misc/rp2040_xosc.h"
 #include "hw/ssi/rp2040_xip.h"
@@ -37,6 +41,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040State, RP2040)
 #define RP2040_USBCTRL_DPRAM_SIZE (4 * KiB)
 #define RP2040_USBCTRL_REGS_BASE  0x50110000
 #define RP2040_USBCTRL_REGS_SIZE  0x4000
+#define RP2040_NUM_IRQS           32
 
 struct RP2040State {
     SysBusDevice parent_obj;
@@ -47,17 +52,29 @@ struct RP2040State {
     RP2040PllState pll_sys;
     RP2040PllState pll_usb;
     RP2040ResetsState resets;
+    RP2040SysCfgState syscfg;
+    RP2040SysInfoState sysinfo;
+    RP2040VregState vreg;
     RP2040WatchdogState watchdog;
     RP2040XoscState xosc;
     RP2040XipState xip;
 
     MemoryRegion *board_memory;
     MemoryRegion rom;
+    MemoryRegion rom_poweroff;
     MemoryRegion sram[6];
+    MemoryRegion sram_poweroff[6];
     MemoryRegion usbctrl_dpram;
+    MemoryRegion usbctrl_dpram_poweroff;
     MemoryRegion usbctrl_regs;
     uint32_t usbctrl_reg[0x100 / sizeof(uint32_t)];
     char *bootrom_file;
+
+    qemu_irq *irq;
+    qemu_irq cpu_irq[RP2040_NUM_IRQS];
+    qemu_irq nmi_irq;
+    bool irq_level[RP2040_NUM_IRQS];
+    bool mempowerdown_ready;
 
     Clock *sysclk;
 };

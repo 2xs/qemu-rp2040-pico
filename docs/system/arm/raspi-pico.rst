@@ -108,7 +108,13 @@ watchdog scratch registers, and clears ``XIP_CTRL.CTRL.EN`` through the
 atomic clear alias at ``0x14003000``.  The USB controller DPRAM is backed by
 the documented 4 KiB RAM window at ``0x50100000``.  ``USBCTRL_REGS`` has a
 shallow register-store model for the registers touched by the ROM, including
-the RP2040 atomic aliases.
+the RP2040 atomic aliases.  ``SYSINFO`` returns stable chip/platform values,
+and ``SYSCFG`` stores the processor NMI/configuration registers touched by the
+ROM.  ``PROC0_NMI_MASK`` reroutes connected interrupt sources to the
+Cortex-M0+ NMI input, and ``MEMPOWERDOWN`` disables ROM, SRAM bank and USB
+DPRAM windows by returning memory transaction errors.  ``VREG_AND_CHIP_RESET``
+exposes the voltage-regulator, brown-out detector and chip reset status
+registers with stable shallow behaviour.
 
 Clock and XOSC model
 --------------------
@@ -143,6 +149,21 @@ The current QEMU model stores ``RESET`` and ``WDSEL`` for documented bits
 ``RESET_DONE`` immediately as the inverse of ``RESET`` for those bits.  It
 does not yet propagate resets into the individual peripheral models or model
 reset completion delays.
+
+VREG and chip reset model
+-------------------------
+
+The RP2040 datasheet describes the shared ``VREG_AND_CHIP_RESET`` register
+window at ``0x40064000`` with ``VREG``, ``BOD`` and ``CHIP_RESET`` registers.
+``CHIP_RESET`` records chip-level reset sources: power-on/brown-out, RUN pin,
+and Rescue Debug Port.  See datasheet pages 157 to 158 and 167.
+
+The current QEMU model stores the writable ``VREG`` and ``BOD`` fields,
+reports ``VREG.ROK`` as stable when the regulator is enabled and not in high
+impedance mode, and stores the software-visible Rescue Debug Port flag in
+``CHIP_RESET``.  Watchdog reset cause is reported by the watchdog block's
+``REASON`` register; it is not reflected in ``CHIP_RESET`` because the
+documented ``CHIP_RESET`` source fields do not include watchdog reset.
 
 PLL model
 ---------
@@ -274,6 +295,15 @@ Known limitations
  * USB, PIO, DMA and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.
+ * ``SYSINFO`` and ``SYSCFG`` expose the documented register layout used by
+   early firmware.  ``PROC0_NMI_MASK`` is wired for interrupt sources routed
+   through the RP2040 IRQ shim, currently including UART0, and
+   ``MEMPOWERDOWN`` makes powered-off ROM, SRAM bank and USB DPRAM windows
+   return memory transaction errors.  ``DBGFORCE`` is stored but not connected
+   to an SWD/debug fabric model.
+ * ``VREG_AND_CHIP_RESET`` stores the voltage-regulator and brown-out detector
+   control fields and exposes stable chip reset status.  Analog regulator and
+   brown-out behaviour is not modeled.
  * The watchdog models ``CTRL``, ``LOAD``, ``REASON``, ``SCRATCH`` and
    ``TICK``, including ``CTRL.TRIGGER`` and the RP2040-E1 double-decrement
    behaviour.  Debug pause inputs are stored but not connected to a debug

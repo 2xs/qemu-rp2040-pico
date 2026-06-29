@@ -74,8 +74,6 @@ static const struct {
     hwaddr base;
     hwaddr size;
 } rp2040_unimplemented[] = {
-    { "rp2040.sysinfo",  0x40000000, 0x4000 },
-    { "rp2040.syscfg",   0x40004000, 0x4000 },
     { "rp2040.psm",      0x40010000, 0x4000 },
     { "rp2040.iobank0",  0x40014000, 0x4000 },
     { "rp2040.ioqspi",   0x40018000, 0x4000 },
@@ -92,7 +90,6 @@ static const struct {
     { "rp2040.timer",    0x40054000, 0x4000 },
     { "rp2040.rtc",      0x4005c000, 0x4000 },
     { "rp2040.rosc",     0x40060000, 0x4000 },
-    { "rp2040.vreg_and_chip_reset", 0x40064000, 0x4000 },
     { "rp2040.tbman",    0x4006c000, 0x4000 },
     { "rp2040.dma",      0x50000000, 0x1000 },
     { "rp2040.pio0",     0x50200000, 0x10000 },
@@ -113,6 +110,86 @@ static uint32_t rp2040_apply_atomic_alias(uint32_t old, uint32_t value,
     default:
         return value;
     }
+}
+
+static MemTxResult rp2040_powered_off_read(void *opaque, hwaddr addr,
+                                           uint64_t *data, unsigned size,
+                                           MemTxAttrs attrs)
+{
+    *data = 0;
+    return MEMTX_ERROR;
+}
+
+static MemTxResult rp2040_powered_off_write(void *opaque, hwaddr addr,
+                                            uint64_t data, unsigned size,
+                                            MemTxAttrs attrs)
+{
+    return MEMTX_ERROR;
+}
+
+static const MemoryRegionOps rp2040_powered_off_ops = {
+    .read_with_attrs = rp2040_powered_off_read,
+    .write_with_attrs = rp2040_powered_off_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 4,
+    },
+};
+
+static void rp2040_update_mempowerdown(RP2040State *s)
+{
+    uint32_t mempowerdown;
+    int i;
+
+    if (!s->mempowerdown_ready) {
+        return;
+    }
+
+    mempowerdown = rp2040_syscfg_get_mempowerdown(&s->syscfg);
+
+    for (i = 0; i < ARRAY_SIZE(s->sram_poweroff); i++) {
+        memory_region_set_enabled(&s->sram_poweroff[i],
+                                  mempowerdown & BIT(i));
+    }
+
+    memory_region_set_enabled(&s->usbctrl_dpram_poweroff,
+                              mempowerdown & BIT(6));
+    memory_region_set_enabled(&s->rom_poweroff, mempowerdown & BIT(7));
+}
+
+static void rp2040_update_nmi(RP2040State *s)
+{
+    uint32_t nmi_mask = rp2040_syscfg_get_proc0_nmi_mask(&s->syscfg);
+    bool nmi_level = false;
+    int i;
+
+    for (i = 0; i < RP2040_NUM_IRQS; i++) {
+        bool irq_level = s->irq_level[i];
+        bool route_to_nmi = nmi_mask & BIT(i);
+
+        qemu_set_irq(s->cpu_irq[i], irq_level && !route_to_nmi);
+        nmi_level |= irq_level && route_to_nmi;
+    }
+
+    qemu_set_irq(s->nmi_irq, nmi_level);
+}
+
+static void rp2040_syscfg_update(void *opaque)
+{
+    RP2040State *s = opaque;
+
+    rp2040_update_mempowerdown(s);
+    rp2040_update_nmi(s);
+}
+
+static void rp2040_set_irq(void *opaque, int irq, int level)
+{
+    RP2040State *s = opaque;
+
+    assert(irq >= 0 && irq < RP2040_NUM_IRQS);
+    s->irq_level[irq] = level;
+    rp2040_update_nmi(s);
 }
 
 static uint64_t rp2040_usbctrl_regs_read(void *opaque, hwaddr addr,
@@ -214,10 +291,14 @@ static void rp2040_soc_init(Object *obj)
     qdev_prop_set_uint32(DEVICE(&s->pll_usb), "fallback-hz", 48000000);
 
     object_initialize_child(obj, "resets", &s->resets, TYPE_RP2040_RESETS);
+    object_initialize_child(obj, "syscfg", &s->syscfg, TYPE_RP2040_SYSCFG);
+    object_initialize_child(obj, "sysinfo", &s->sysinfo, TYPE_RP2040_SYSINFO);
+    object_initialize_child(obj, "vreg", &s->vreg, TYPE_RP2040_VREG);
     object_initialize_child(obj, "watchdog", &s->watchdog,
                             TYPE_RP2040_WATCHDOG);
     object_initialize_child(obj, "xosc", &s->xosc, TYPE_RP2040_XOSC);
 
+    s->irq = qemu_allocate_irqs(rp2040_set_irq, s, RP2040_NUM_IRQS);
     s->sysclk = clock_new(obj, "sysclk");
 }
 
@@ -239,6 +320,12 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     memory_region_add_subregion(s->board_memory, RP2040_ROM_BASE, &s->rom);
+    memory_region_init_io(&s->rom_poweroff, OBJECT(dev),
+                          &rp2040_powered_off_ops, s,
+                          "rp2040.rom.poweroff", RP2040_ROM_SIZE);
+    memory_region_add_subregion_overlap(s->board_memory, RP2040_ROM_BASE,
+                                        &s->rom_poweroff, 1);
+    memory_region_set_enabled(&s->rom_poweroff, false);
 
     if (s->bootrom_file) {
         filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, s->bootrom_file);
@@ -287,6 +374,22 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->resets), 0, RP2040_RESETS_BASE);
 
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->syscfg), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->syscfg), 0, RP2040_SYSCFG_BASE);
+    rp2040_syscfg_set_update_callback(&s->syscfg, rp2040_syscfg_update, s);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->sysinfo), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sysinfo), 0, RP2040_SYSINFO_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->vreg), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->vreg), 0, RP2040_VREG_BASE);
+
     qdev_connect_clock_in(DEVICE(&s->watchdog), "clk-ref",
                           qdev_get_clock_out(DEVICE(&s->clocks), "clk-ref"));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->watchdog), errp)) {
@@ -301,6 +404,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
 
     for (i = 0; i < 4; i++) {
         g_autofree char *name = g_strdup_printf("rp2040.sram%d", i);
+        g_autofree char *poweroff_name =
+            g_strdup_printf("rp2040.sram%d.poweroff", i);
 
         if (!memory_region_init_ram(&s->sram[i], OBJECT(dev), name,
                                     RP2040_SRAM_BANK_SIZE, errp)) {
@@ -310,6 +415,14 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
                                     RP2040_SRAM_BASE +
                                     i * RP2040_SRAM_BANK_SIZE,
                                     &s->sram[i]);
+        memory_region_init_io(&s->sram_poweroff[i], OBJECT(dev),
+                              &rp2040_powered_off_ops, s, poweroff_name,
+                              RP2040_SRAM_BANK_SIZE);
+        memory_region_add_subregion_overlap(s->board_memory,
+                                            RP2040_SRAM_BASE +
+                                            i * RP2040_SRAM_BANK_SIZE,
+                                            &s->sram_poweroff[i], 1);
+        memory_region_set_enabled(&s->sram_poweroff[i], false);
     }
 
     if (!memory_region_init_ram(&s->sram[4], OBJECT(dev), "rp2040.sram4",
@@ -318,6 +431,12 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     }
     memory_region_add_subregion(s->board_memory, RP2040_SRAM4_BASE,
                                 &s->sram[4]);
+    memory_region_init_io(&s->sram_poweroff[4], OBJECT(dev),
+                          &rp2040_powered_off_ops, s,
+                          "rp2040.sram4.poweroff", RP2040_SRAM_HI_SIZE);
+    memory_region_add_subregion_overlap(s->board_memory, RP2040_SRAM4_BASE,
+                                        &s->sram_poweroff[4], 1);
+    memory_region_set_enabled(&s->sram_poweroff[4], false);
 
     if (!memory_region_init_ram(&s->sram[5], OBJECT(dev), "rp2040.sram5",
                                 RP2040_SRAM_HI_SIZE, errp)) {
@@ -325,6 +444,12 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     }
     memory_region_add_subregion(s->board_memory, RP2040_SRAM5_BASE,
                                 &s->sram[5]);
+    memory_region_init_io(&s->sram_poweroff[5], OBJECT(dev),
+                          &rp2040_powered_off_ops, s,
+                          "rp2040.sram5.poweroff", RP2040_SRAM_HI_SIZE);
+    memory_region_add_subregion_overlap(s->board_memory, RP2040_SRAM5_BASE,
+                                        &s->sram_poweroff[5], 1);
+    memory_region_set_enabled(&s->sram_poweroff[5], false);
 
     if (!memory_region_init_ram(&s->usbctrl_dpram, OBJECT(dev),
                                 "rp2040.usbctrl_dpram",
@@ -333,6 +458,17 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     }
     memory_region_add_subregion(s->board_memory, RP2040_USBCTRL_DPRAM_BASE,
                                 &s->usbctrl_dpram);
+    memory_region_init_io(&s->usbctrl_dpram_poweroff, OBJECT(dev),
+                          &rp2040_powered_off_ops, s,
+                          "rp2040.usbctrl_dpram.poweroff",
+                          RP2040_USBCTRL_DPRAM_SIZE);
+    memory_region_add_subregion_overlap(s->board_memory,
+                                        RP2040_USBCTRL_DPRAM_BASE,
+                                        &s->usbctrl_dpram_poweroff, 1);
+    memory_region_set_enabled(&s->usbctrl_dpram_poweroff, false);
+
+    s->mempowerdown_ready = true;
+    rp2040_update_mempowerdown(s);
 
     memory_region_init_io(&s->usbctrl_regs, OBJECT(dev),
                           &rp2040_usbctrl_regs_ops, s,
@@ -358,6 +494,11 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp)) {
         return;
     }
+    for (i = 0; i < RP2040_NUM_IRQS; i++) {
+        s->cpu_irq[i] = qdev_get_gpio_in(DEVICE(&s->armv7m), i);
+    }
+    s->nmi_irq = qdev_get_gpio_in_named(DEVICE(&s->armv7m), "NMI", 0);
+    rp2040_update_nmi(s);
 
     qdev_connect_clock_in(DEVICE(&s->uart0), "clk",
                           qdev_get_clock_out(DEVICE(&s->clocks), "clk-peri"));
@@ -365,8 +506,7 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart0), 0, RP2040_UART0_BASE);
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart0), 0,
-                       qdev_get_gpio_in(DEVICE(&s->armv7m), RP2040_UART0_IRQ));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart0), 0, s->irq[RP2040_UART0_IRQ]);
 }
 
 static const Property rp2040_soc_properties[] = {
