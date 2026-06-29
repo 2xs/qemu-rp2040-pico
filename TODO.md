@@ -230,14 +230,16 @@ Current XIP backing note:
 - [x] Reject or document unsupported commands.
 - [x] Define behavior for out-of-range erase/program requests.
 - [x] Add tests for successful erase/program/readback.
-- [ ] Add tests for programming without write enable.
-- [ ] Add tests for attempting to change bits from `0` back to `1` without erase.
+- [x] Add tests for programming without write enable.
+- [x] Add tests for attempting to change bits from `0` back to `1` without erase.
 
 Current flash command model note:
 
 - The command model lives in a minimal RP2040 XIP/SSI device, mapped at the
   XIP window, XIP control base, and `XIP_SSI_BASE`.
 - Unsupported commands are ignored.
+- Functional tests cover successful erase/program/readback, ignored page
+  program without write enable, and NOR `old & new` programming semantics.
 - Out-of-range erase/program commands have no effect. If they consumed write
   enable state, write enable is cleared and the flash does not become busy.
 
