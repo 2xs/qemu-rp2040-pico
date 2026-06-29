@@ -6,6 +6,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/misc/rp2040_sio.h"
+#include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
 #include "qemu/log.h"
@@ -64,8 +65,10 @@ static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
         value = 0;
         break;
     case SIO_GPIO_IN:
+        value = s->gpio_in;
+        break;
     case SIO_GPIO_HI_IN:
-        value = 0;
+        value = s->gpio_hi_in;
         break;
     case SIO_GPIO_OUT:
         value = s->gpio_out;
@@ -195,6 +198,8 @@ static void rp2040_sio_reset(DeviceState *dev)
 {
     RP2040SioState *s = RP2040_SIO(dev);
 
+    s->gpio_in &= SIO_GPIO_MASK;
+    s->gpio_hi_in &= SIO_GPIO_HI_MASK;
     s->gpio_out = 0;
     s->gpio_oe = 0;
     s->gpio_hi_out = 0;
@@ -218,6 +223,8 @@ static const VMStateDescription vmstate_rp2040_sio = {
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32(gpio_out, RP2040SioState),
+        VMSTATE_UINT32(gpio_in, RP2040SioState),
+        VMSTATE_UINT32(gpio_hi_in, RP2040SioState),
         VMSTATE_UINT32(gpio_oe, RP2040SioState),
         VMSTATE_UINT32(gpio_hi_out, RP2040SioState),
         VMSTATE_UINT32(gpio_hi_oe, RP2040SioState),
@@ -227,11 +234,17 @@ static const VMStateDescription vmstate_rp2040_sio = {
     }
 };
 
+static const Property rp2040_sio_properties[] = {
+    DEFINE_PROP_UINT32("gpio-in", RP2040SioState, gpio_in, 0),
+    DEFINE_PROP_UINT32("gpio-hi-in", RP2040SioState, gpio_hi_in, 0),
+};
+
 static void rp2040_sio_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     device_class_set_legacy_reset(dc, rp2040_sio_reset);
+    device_class_set_props(dc, rp2040_sio_properties);
     dc->vmsd = &vmstate_rp2040_sio;
 }
 

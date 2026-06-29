@@ -10,6 +10,7 @@
 
 #define SIO_BASE                0xd0000000
 #define SIO_CPUID               0x000
+#define SIO_GPIO_IN             0x004
 #define SIO_GPIO_HI_IN          0x008
 #define SIO_GPIO_OUT            0x010
 #define SIO_GPIO_OUT_SET        0x014
@@ -34,7 +35,8 @@ static void test_sio_reset_values(void)
     QTestState *qts = rp2040_start();
 
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_CPUID), ==, 0);
-    g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_HI_IN), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_IN), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_HI_IN), ==, BIT(1));
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_OUT), ==, 0);
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_HI_OUT), ==, 0);
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_FIFO_ST), ==, BIT(1));

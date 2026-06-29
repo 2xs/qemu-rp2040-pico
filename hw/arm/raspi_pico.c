@@ -53,6 +53,11 @@ static void raspi_pico_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "soc", &s->soc, TYPE_RP2040);
     qdev_prop_set_chr(DEVICE(&s->soc), "serial0", serial_hd(0));
+    /*
+     * BOOTSEL is not pressed by default on a Pico board, so the mask ROM sees
+     * the QSPI SS input deasserted and tries to boot from external flash.
+     */
+    qdev_prop_set_uint32(DEVICE(&s->soc.sio), "gpio-hi-in", 1u << 1);
     if (s->flash_file) {
         qdev_prop_set_string(DEVICE(&s->soc.xip), "flash-file",
                              s->flash_file);
