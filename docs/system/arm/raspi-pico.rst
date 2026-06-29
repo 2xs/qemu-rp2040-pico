@@ -115,7 +115,10 @@ Cortex-M0+ NMI input, and ``MEMPOWERDOWN`` disables ROM, SRAM bank and USB
 DPRAM windows by returning memory transaction errors.  ``VREG_AND_CHIP_RESET``
 exposes the voltage-regulator, brown-out detector and chip reset status
 registers with stable shallow behaviour.  ``TBMAN.PLATFORM`` reports the
-documented ASIC platform bit.
+documented ASIC platform bit.  ``SIO`` implements the core ID, the user and
+QSPI GPIO output/output-enable registers, mailbox status for the empty
+single-core case, and hardware spinlock claim/release semantics.  The SIO
+inter-core FIFO, divider and interpolator datapaths remain simplified.
 
 Clock and XOSC model
 --------------------
