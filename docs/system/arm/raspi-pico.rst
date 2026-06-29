@@ -16,10 +16,11 @@ The RP2040 SoC skeleton, Pico machine, and memory map are adapted from that
 series to the current QEMU tree.  The RFC ``pc-bios/pipico.rom`` image is
 kept in the tree for bring-up experiments.
 
-The active boot path is not yet the RFC mask ROM path.  QEMU currently uses a
-small synthetic boot ROM to enter a raw image in the XIP window, while the
-RFC mask ROM loading logic remains the next compatibility step to integrate
-or adapt and debug against the minimal RP2040 model.
+RFC patch 0005's mask ROM loading logic is adapted for the current machine:
+``pipico.rom`` is used by default when no direct ``-kernel`` image, explicit
+``-bios`` image, or raw ``flash-file`` is supplied.  QEMU still uses a small
+synthetic boot ROM for direct XIP bring-up, so existing firmware tests remain
+stable.
 
 Supported devices
 -----------------
@@ -61,10 +62,10 @@ An RP2040 boot ROM image can be supplied explicitly with ``-bios``:
 
 The file name is resolved through QEMU's BIOS search path, the same mechanism
 used by other machines for firmware blobs.  The RFC ``pipico.rom`` image is
-installed as a QEMU BIOS blob for local bring-up, but the current RP2040 model
-does not yet provide all hardware behaviour needed by the real mask ROM boot
-flow.  If ``-bios`` is omitted, QEMU keeps using the synthetic boot ROM
-described above.
+installed as a QEMU BIOS blob for local bring-up.  If no ``-kernel``,
+``-bios`` or raw ``flash-file`` is supplied, ``raspi-pico`` uses
+``pipico.rom`` by default.  Direct XIP bring-up keeps using the synthetic boot
+ROM described above, and explicit ``-bios`` still overrides the default.
 
 Mask ROM bring-up tracing
 -------------------------
@@ -91,9 +92,10 @@ offset ``0x08`` (``0x4000c008``) also completes.  The current observed tight
 polling loop on ``rp2040.pll_sys`` offset ``0x00`` (``0x40028000``) also
 completes.  The ROM then switches ``clk_sys`` to the PLL path, writes
 watchdog scratch registers, and clears ``XIP_CTRL.CTRL.EN`` through the
-atomic clear alias at ``0x14003000``.  The current bring-up blocker is a
-later invalid-state fault after the ROM populates ``USBCTRL_DPRAM`` and reads
-back callback pointers from the still-unimplemented DPRAM model.
+atomic clear alias at ``0x14003000``.  The USB controller DPRAM is backed by
+the documented 4 KiB RAM window at ``0x50100000``.  ``USBCTRL_REGS`` has a
+shallow register-store model for the registers touched by the ROM, including
+the RP2040 atomic aliases.
 
 Clock and XOSC model
 --------------------
@@ -256,6 +258,6 @@ Known limitations
    ``XOR``/``SET``/``CLR`` aliases.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.
- * USB, PIO, DMA, watchdog and most peripherals are not yet implemented.  The
-   current real mask ROM blocker is an invalid-state fault after USB DPRAM
-   setup because the placeholder DPRAM device does not retain written data.
+ * USB, PIO, DMA, watchdog and most peripherals are not yet implemented.  USB
+   DPRAM is present as RAM and ``USBCTRL_REGS`` stores register state, but USB
+   packet-level behavior is not modeled.

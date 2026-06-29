@@ -29,19 +29,19 @@ Current RFC integration status:
 - RFC patch 0004 is copied as `pc-bios/pipico.rom` for local bring-up. It is
   treated as a useful reference artifact, not as a final upstream boot ROM
   provenance answer.
-- RFC patch 0005 has been reviewed but is not the active boot path yet. The
-  current model keeps a synthetic boot ROM so direct XIP tests remain stable;
-  the next boot-ROM step is to integrate or adapt the RFC mask ROM loading and
-  debug the extra RP2040 blocks the real ROM requires.
+- RFC patch 0005 is adapted as the default mask ROM policy when no direct
+  `-kernel`, explicit `-bios`, or raw `flash-file` image is supplied. The
+  current model keeps a synthetic boot ROM for direct XIP tests, while
+  `-bios` remains an explicit override.
 - Mask ROM bring-up tracing is available with `-d unimp,guest_errors` and
   logs named RP2040 MMIO accesses, including absolute addresses. The first
   observed blocker, repeated polling of `rp2040.clocks` at `0x40008044`, is
   resolved by the minimal clock model. The later blocker on `rp2040.resets`
   at `0x4000c008` is resolved by the minimal reset controller. The later
   `0x14003000` HardFault is resolved by modelling the XIP control atomic
-  aliases. The current blocker is an invalid-state fault after the ROM writes
-  USB descriptors and callback pointers into `USBCTRL_DPRAM`, then reads them
-  back from the still-unimplemented DPRAM model.
+  aliases. `USBCTRL_DPRAM` is now mapped as the documented 4 KiB USB data
+  RAM. `USBCTRL_REGS` has a shallow register-store model with RP2040 atomic
+  aliases; USB packet-level behavior is still out of scope.
 
 ## Phase 0: Baseline
 
@@ -138,10 +138,11 @@ Current boot ROM strategy note:
   QEMU's BIOS search path.
 - `-bios pipico.rom` now loads through QEMU's ROM loader so the Cortex-M reset
   path sees the boot ROM vector table correctly.
-- The active boot path is still the synthetic boot ROM described in phase 4.
-- The RFC mask ROM loader from patch 0005 should be integrated or adapted next
-  behind a deliberate boot-ROM policy, then debugged against the minimal SoC
-  model instead of discarded.
+- RFC patch 0005 is adapted with a deliberate boot-ROM policy: if no
+  `-kernel`, `-bios`, or `flash-file` is supplied, the Pico machine uses
+  `pipico.rom` from QEMU's BIOS search path. Direct XIP bring-up keeps the
+  synthetic ROM described in phase 4, and explicit `-bios` still overrides
+  the default.
 
 Current mask ROM trace finding:
 
@@ -285,10 +286,10 @@ Current clock/reset bring-up note:
   QEMU `Clock` output. The current RP2040 clock generator still uses fixed
   PLL_SYS/PLL_USB frequencies, so the PLL model does not yet affect CPU
   execution speed or clock mux output.
-- The RFC `pipico.rom` no longer blocks on `PLL_SYS` lock. It now reaches a
-  later invalid-state fault after populating `USBCTRL_DPRAM` because the
-  current placeholder DPRAM device logs writes but does not retain data for
-  subsequent reads.
+- The RFC `pipico.rom` no longer blocks on `PLL_SYS` lock or on the earlier
+  XIP control alias access. The USB data DPRAM is now backed by RAM and
+  `USBCTRL_REGS` stores the registers touched by the boot ROM, including
+  atomic aliases. Full USB signaling and packet handling remain future work.
 
 ## Phase 13: Documentation
 

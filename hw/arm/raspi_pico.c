@@ -21,6 +21,8 @@
 #define TYPE_RASPI_PICO_MACHINE MACHINE_TYPE_NAME("raspi-pico")
 OBJECT_DECLARE_SIMPLE_TYPE(RaspiPicoMachineState, RASPI_PICO_MACHINE)
 
+#define RASPI_PICO_MASK_ROM "pipico.rom"
+
 struct RaspiPicoMachineState {
     MachineState parent_obj;
 
@@ -58,6 +60,9 @@ static void raspi_pico_init(MachineState *machine)
     if (machine->firmware) {
         qdev_prop_set_string(DEVICE(&s->soc), "bootrom-file",
                              machine->firmware);
+    } else if (!machine->kernel_filename && !s->flash_file) {
+        qdev_prop_set_string(DEVICE(&s->soc), "bootrom-file",
+                             RASPI_PICO_MASK_ROM);
     }
     object_property_set_link(OBJECT(&s->soc), "memory",
                              OBJECT(system_memory), &error_fatal);
