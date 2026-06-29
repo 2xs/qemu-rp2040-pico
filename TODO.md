@@ -103,6 +103,7 @@ Baseline commands used:
 - [x] Decide the first boot policy: direct `-kernel` load into XIP at `0x10000000`.
 - [x] Add firmware reset registration through `armv7m_load_kernel()`.
 - [x] Restore or confirm ELF loading behavior for images linked at `0x10000000`.
+- [x] Support Pico 1 UF2 images through `-kernel`.
 - [x] Confirm raw binary loading behavior.
 - [x] Create or obtain a tiny bare-metal test firmware that loops.
 - [x] Launch QEMU with the test firmware.
@@ -113,8 +114,9 @@ Current temporary boot behavior:
 
 - QEMU installs a tiny synthetic boot ROM at `0x00000000`.
 - `-kernel` is loaded into the emulated XIP flash storage through the RP2040
-  XIP loader, which accepts ELF images first and raw images as a fallback.
-  The `armv7m_load_kernel()` helper is still used to register reset handling.
+  XIP loader, which accepts ELF images, Pico 1 UF2 images, and raw images as
+  a fallback. The `armv7m_load_kernel()` helper is still used to register
+  reset handling.
 - The synthetic ROM uses a fixed SRAM stack top, sets `VTOR` to the XIP vector
   table, and branches to the reset handler from `0x10000004`.
 - This is only a bring-up path; it is not a faithful RP2040 mask ROM model.
@@ -190,6 +192,10 @@ Current automated test note:
 
 - The first functional test embeds a tiny raw Cortex-M0+ UART firmware directly
   in the test source, so no optional toolchain or external fixture is required.
+- The UF2 path is also tested: the functional test builds a minimal Pico 1 UF2
+  image, passes it directly with `-kernel`, and also checks that
+  `flash-file=... -kernel firmware.uf2` overlays the UF2 contents into the
+  emulated XIP flash.
 
 ## Phase 8: XIP Flash Backing
 
@@ -206,6 +212,10 @@ Current XIP backing note:
 
 - `raspi-pico` exposes `flash-file=/path/to/flash.bin` as a raw initial XIP
   image. Missing bytes are initialized to erased NOR state, `0xff`.
+- If `flash-file` and `-kernel` are both supplied, the raw file is loaded
+  first, then the `-kernel` image overlays the in-memory XIP flash contents.
+- `scripts/uf2-to-flash.py` converts Pico UF2 files into this raw flash image
+  format for host-side testing.
 - Guest programming and erase now go through the minimal RP2040 XIP/SSI model.
   Host writeback and persistence are intentionally deferred to phase 11.
 
@@ -241,6 +251,10 @@ Current flash command model note:
 ## Phase 11: Flash Persistence
 
 - [ ] Ensure flash modifications are written back to the raw host file.
+- [ ] Make `flash-file=flash.bin -kernel firmware.{elf,uf2,bin}` update the
+  raw flash file with the overlaid `-kernel` contents at startup, so a later
+  run with only `flash-file=flash.bin` restarts from the same programmed
+  image.
 - [ ] Add a first-run test that erases/programs flash.
 - [ ] Add a second-run test that reads the persisted bytes.
 - [ ] Verify persistence across separate QEMU invocations.

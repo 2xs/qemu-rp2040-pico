@@ -11,6 +11,12 @@ from qemu_test import QemuSystemTest, wait_for_console_pattern
 
 class RaspiPicoMachine(QemuSystemTest):
 
+    UF2_MAGIC_START0 = 0x0A324655
+    UF2_MAGIC_START1 = 0x9E5D5157
+    UF2_MAGIC_END = 0x0AB16F30
+    UF2_FLAG_FAMILY_ID_PRESENT = 0x00002000
+    RP2040_FAMILY_ID = 0xE48BFF56
+
     # Minimal Cortex-M0+ raw image linked for XIP at 0x10000000. It contains a
     # vector table and writes "PICO UART OK\n" to UART0 at 0x40034000.
     UART_TEST_BIN = bytes([
@@ -57,6 +63,29 @@ class RaspiPicoMachine(QemuSystemTest):
         )
 
         return elf_header + phdr + bytes(payload_off - 84) + payload
+
+    @classmethod
+    def make_uf2(cls, payload):
+        padded_payload = payload + bytes([0xff]) * (256 - len(payload))
+        block = bytearray(512)
+
+        struct.pack_into(
+            '<IIIIIIII',
+            block,
+            0,
+            cls.UF2_MAGIC_START0,
+            cls.UF2_MAGIC_START1,
+            cls.UF2_FLAG_FAMILY_ID_PRESENT,
+            0x10000000,
+            256,
+            0,
+            1,
+            cls.RP2040_FAMILY_ID,
+        )
+        block[32:288] = padded_payload
+        struct.pack_into('<I', block, 512 - 4, cls.UF2_MAGIC_END)
+
+        return bytes(block)
 
     # Copies a small routine to SRAM, erases/programs flash through the SSI
     # registers, polls status once, then verifies the programmed bytes via XIP.
@@ -170,6 +199,36 @@ class RaspiPicoMachine(QemuSystemTest):
         self.set_machine('raspi-pico')
         self.vm.set_machine(f'raspi-pico,flash-file={flash}')
         self.vm.set_console()
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'PICO UART OK')
+
+    def test_uart0_uf2(self):
+        uf2 = self.scratch_file('uart-test.uf2')
+
+        with open(uf2, 'wb') as uf2_file:
+            uf2_file.write(self.make_uf2(self.UART_TEST_BIN))
+
+        self.set_machine('raspi-pico')
+        self.vm.set_console()
+        self.vm.add_args('-kernel', uf2)
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'PICO UART OK')
+
+    def test_flash_file_uart0_overlayed_by_uf2_kernel(self):
+        uf2 = self.scratch_file('uart-test.uf2')
+        flash = self.scratch_file('flash.bin')
+
+        with open(uf2, 'wb') as uf2_file:
+            uf2_file.write(self.make_uf2(self.UART_TEST_BIN))
+        with open(flash, 'wb') as flash_file:
+            flash_file.write(bytes([0xff]) * 512)
+
+        self.set_machine('raspi-pico')
+        self.vm.set_machine(f'raspi-pico,flash-file={flash}')
+        self.vm.set_console()
+        self.vm.add_args('-kernel', uf2)
         self.vm.launch()
 
         wait_for_console_pattern(self, 'PICO UART OK')

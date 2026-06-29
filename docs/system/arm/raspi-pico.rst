@@ -38,8 +38,8 @@ Boot options
 ------------
 
 For direct bring-up, a firmware image can be loaded into the XIP window with
-``-kernel``.  ELF images linked at ``0x10000000`` are accepted, with raw
-images loaded at ``0x10000000`` as a fallback:
+``-kernel``.  ELF images linked at ``0x10000000`` and Pico 1 UF2 images are
+accepted, with raw images loaded at ``0x10000000`` as a fallback:
 
 .. code-block:: bash
 
@@ -53,6 +53,17 @@ The machine also accepts a raw initial flash image:
 
 Bytes not provided by the raw flash image are initialized to the NOR erased
 state, ``0xff``.
+
+If both ``flash-file`` and ``-kernel`` are specified, the raw flash file is
+loaded first, then the ``-kernel`` image is overlaid into the emulated XIP
+flash.  At the current stage this overlay is in QEMU memory only and is not
+written back to the raw host file.
+
+Pico UF2 images can be converted to this raw flash format with:
+
+.. code-block:: bash
+
+  $ scripts/uf2-to-flash.py firmware.uf2 flash.bin
 
 An RP2040 boot ROM image can be supplied explicitly with ``-bios``:
 
