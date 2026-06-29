@@ -252,15 +252,23 @@ Current flash command model note:
 
 ## Phase 11: Flash Persistence
 
-- [ ] Ensure flash modifications are written back to the raw host file.
-- [ ] Make `flash-file=flash.bin -kernel firmware.{elf,uf2,bin}` update the
+- [x] Ensure flash modifications are written back to the raw host file.
+- [x] Make `flash-file=flash.bin -kernel firmware.{elf,uf2,bin}` update the
   raw flash file with the overlaid `-kernel` contents at startup, so a later
   run with only `flash-file=flash.bin` restarts from the same programmed
   image.
-- [ ] Add a first-run test that erases/programs flash.
-- [ ] Add a second-run test that reads the persisted bytes.
-- [ ] Verify persistence across separate QEMU invocations.
-- [ ] Document the raw backing file workflow.
+- [x] Add a first-run test that erases/programs flash.
+- [x] Add a second-run test that reads the persisted bytes.
+- [x] Verify persistence across separate QEMU invocations.
+- [x] Document the raw backing file workflow.
+
+Current persistence note:
+
+- When `flash-file` is supplied, QEMU writes back the complete emulated flash
+  image, `flash-size` bytes, after `-kernel` overlay and after successful
+  guest sector erase or page program commands.
+- Functional tests cover a persisted `-kernel` UF2 overlay and a persisted
+  guest erase/program sequence observed by a second QEMU invocation.
 
 ## Phase 12: Minimal Clock, Reset, Watchdog, and Timer Stubs
 

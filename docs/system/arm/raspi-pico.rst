@@ -56,8 +56,10 @@ state, ``0xff``.
 
 If both ``flash-file`` and ``-kernel`` are specified, the raw flash file is
 loaded first, then the ``-kernel`` image is overlaid into the emulated XIP
-flash.  At the current stage this overlay is in QEMU memory only and is not
-written back to the raw host file.
+flash.  The complete emulated flash image is written back to the raw file, so
+a later run with only ``flash-file`` restarts from the overlaid image.
+Successful guest sector erase and page program commands are also written back
+to the raw file.
 
 Pico UF2 images can be converted to this raw flash format with:
 

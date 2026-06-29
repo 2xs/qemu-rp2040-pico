@@ -132,6 +132,33 @@ static void rp2040_xip_reset_tx(RP2040XipState *s)
     s->tx_len = 0;
 }
 
+static bool rp2040_xip_writeback(RP2040XipState *s, Error **errp)
+{
+    g_autoptr(GError) gerr = NULL;
+
+    if (!s->flash_file || !*s->flash_file) {
+        return true;
+    }
+
+    if (!g_file_set_contents(s->flash_file, (const char *)s->storage,
+                             s->flash_size, &gerr)) {
+        error_setg(errp, "could not write flash file '%s': %s",
+                   s->flash_file, gerr->message);
+        return false;
+    }
+
+    return true;
+}
+
+static void rp2040_xip_writeback_or_warn(RP2040XipState *s)
+{
+    Error *local_err = NULL;
+
+    if (!rp2040_xip_writeback(s, &local_err)) {
+        warn_report_err(local_err);
+    }
+}
+
 static void rp2040_xip_program(RP2040XipState *s)
 {
     uint32_t addr;
@@ -162,6 +189,7 @@ static void rp2040_xip_program(RP2040XipState *s)
         s->storage[addr + i] &= s->tx[4 + i];
     }
 
+    rp2040_xip_writeback_or_warn(s);
     s->busy = true;
 }
 
@@ -188,6 +216,7 @@ static void rp2040_xip_erase(RP2040XipState *s)
 
     memset(&s->storage[base], 0xff, MIN(FLASH_SECTOR_SIZE,
                                        s->flash_size - base));
+    rp2040_xip_writeback_or_warn(s);
     s->busy = true;
 }
 
@@ -705,24 +734,37 @@ static bool rp2040_xip_load_uf2(RP2040XipState *s, const char *filename,
 void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
                            Error **errp)
 {
+    Error *local_err = NULL;
     ssize_t image_size;
 
     if (!filename) {
         return;
     }
 
-    if (rp2040_xip_load_elf(s, filename, errp)) {
+    if (rp2040_xip_load_elf(s, filename, &local_err)) {
+        if (local_err) {
+            error_propagate(errp, local_err);
+            return;
+        }
+        rp2040_xip_writeback(s, errp);
         return;
     }
 
-    if (rp2040_xip_load_uf2(s, filename, errp)) {
+    if (rp2040_xip_load_uf2(s, filename, &local_err)) {
+        if (local_err) {
+            error_propagate(errp, local_err);
+            return;
+        }
+        rp2040_xip_writeback(s, errp);
         return;
     }
 
     image_size = load_image_size(filename, s->storage, s->flash_size);
     if (image_size < 0) {
         error_setg(errp, "could not load flash image '%s'", filename);
+        return;
     }
+    rp2040_xip_writeback(s, errp);
 }
 
 static void rp2040_xip_realize(DeviceState *dev, Error **errp)

@@ -193,6 +193,25 @@ class RaspiPicoMachine(QemuSystemTest):
         0x60, 0x00, 0x00, 0x18, 0x00, 0x40, 0x03, 0x40,
     ])
 
+    FLASH_PERSIST_READER_BIN = bytes([
+        0x00, 0x20, 0x04, 0x20, 0x11, 0x00, 0x00, 0x10,
+        0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x10,
+        0x16, 0x49, 0x08, 0x78, 0x46, 0x28, 0x0f, 0xd1,
+        0x48, 0x78, 0x4c, 0x28, 0x0c, 0xd1, 0x88, 0x78,
+        0x41, 0x28, 0x09, 0xd1, 0xc8, 0x78, 0x53, 0x28,
+        0x06, 0xd1, 0x08, 0x79, 0x48, 0x28, 0x03, 0xd1,
+        0x0f, 0x48, 0x00, 0xf0, 0x05, 0xf8, 0xfe, 0xe7,
+        0x0e, 0x48, 0x00, 0xf0, 0x01, 0xf8, 0xfe, 0xe7,
+        0x0d, 0x4a, 0x01, 0x78, 0x00, 0x29, 0x02, 0xd0,
+        0x11, 0x60, 0x01, 0x30, 0xf9, 0xe7, 0x70, 0x47,
+        0x50, 0x45, 0x52, 0x53, 0x49, 0x53, 0x54, 0x20,
+        0x4f, 0x4b, 0x0a, 0x00, 0x50, 0x45, 0x52, 0x53,
+        0x49, 0x53, 0x54, 0x20, 0x46, 0x41, 0x49, 0x4c,
+        0x0a, 0x00, 0xc0, 0x46, 0x00, 0x10, 0x00, 0x10,
+        0x50, 0x00, 0x00, 0x10, 0x5c, 0x00, 0x00, 0x10,
+        0x00, 0x40, 0x03, 0x40,
+    ])
+
     # Installs a vector table in SRAM, starts a page program, then performs
     # an XIP read while the emulated flash is busy. The HardFault handler
     # runs from SRAM and prints the expected message.
@@ -308,6 +327,46 @@ class RaspiPicoMachine(QemuSystemTest):
         self.vm.launch()
 
         wait_for_console_pattern(self, 'FLASH OK')
+
+    def launch_flash_file(self, name, flash, pattern, kernel=None):
+        vm = self.get_vm(name=name)
+
+        vm.set_machine(f'raspi-pico,flash-file={flash}')
+        vm.set_console()
+        if kernel:
+            vm.add_args('-kernel', kernel)
+        vm.launch()
+        wait_for_console_pattern(self, pattern, vm=vm)
+        vm.shutdown()
+
+    def test_flash_file_kernel_overlay_persists(self):
+        uf2 = self.scratch_file('uart-test.uf2')
+        flash = self.scratch_file('flash.bin')
+
+        with open(uf2, 'wb') as uf2_file:
+            uf2_file.write(self.make_uf2(self.UART_TEST_BIN))
+        with open(flash, 'wb') as flash_file:
+            flash_file.write(bytes([0xff]) * 512)
+
+        self.set_machine('raspi-pico')
+        self.launch_flash_file('overlay-write', flash, 'PICO UART OK', uf2)
+        self.launch_flash_file('overlay-read', flash, 'PICO UART OK')
+
+    def test_flash_file_guest_writes_persist(self):
+        flash = self.scratch_file('flash.bin')
+        program = self.scratch_file('flash-program.bin')
+        reader = self.scratch_file('flash-reader.bin')
+
+        with open(flash, 'wb') as flash_file:
+            flash_file.write(bytes([0xff]) * 512)
+        with open(program, 'wb') as image_file:
+            image_file.write(self.FLASH_TEST_BIN)
+        with open(reader, 'wb') as image_file:
+            image_file.write(self.FLASH_PERSIST_READER_BIN)
+
+        self.set_machine('raspi-pico')
+        self.launch_flash_file('guest-write', flash, 'FLASH OK', program)
+        self.launch_flash_file('guest-read', flash, 'PERSIST OK', reader)
 
     def test_flash_program_without_write_enable(self):
         self.set_machine('raspi-pico')
