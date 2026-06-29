@@ -37,9 +37,11 @@ Current RFC integration status:
   logs named RP2040 MMIO accesses, including absolute addresses. The first
   observed blocker, repeated polling of `rp2040.clocks` at `0x40008044`, is
   resolved by the minimal clock model. The later blocker on `rp2040.resets`
-  at `0x4000c008` is resolved by the minimal reset controller. The current
-  blocker is a HardFault on access to `0x14003000`, after `PLL_SYS` lock
-  polling completes.
+  at `0x4000c008` is resolved by the minimal reset controller. The later
+  `0x14003000` HardFault is resolved by modelling the XIP control atomic
+  aliases. The current blocker is an invalid-state fault after the ROM writes
+  USB descriptors and callback pointers into `USBCTRL_DPRAM`, then reads them
+  back from the still-unimplemented DPRAM model.
 
 ## Phase 0: Baseline
 
@@ -156,8 +158,8 @@ Current mask ROM trace finding:
   to `CS`, `FBDIV_INT`, `PRIM`, and the atomic alias for `PWR`.
 - This PLL lock loop now completes with the minimal PLL model. The ROM then
   switches `clk_sys` to the PLL path, touches watchdog scratch registers, and
-  faults on an access to `0x14003000`. This is the next bring-up target and
-  likely belongs to the XIP alias/cache view rather than to PLL setup.
+  clears `XIP_CTRL.CTRL.EN` through the atomic clear alias at `0x14003000`.
+  This now completes with the minimal XIP control alias model.
 
 ## Phase 6: Minimal UART0 Console
 
@@ -284,7 +286,9 @@ Current clock/reset bring-up note:
   PLL_SYS/PLL_USB frequencies, so the PLL model does not yet affect CPU
   execution speed or clock mux output.
 - The RFC `pipico.rom` no longer blocks on `PLL_SYS` lock. It now reaches a
-  HardFault on `0x14003000`, after watchdog scratch writes.
+  later invalid-state fault after populating `USBCTRL_DPRAM` because the
+  current placeholder DPRAM device logs writes but does not retain data for
+  subsequent reads.
 
 ## Phase 13: Documentation
 

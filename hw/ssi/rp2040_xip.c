@@ -59,6 +59,26 @@
 #define FLASH_PAGE_SIZE  256
 #define FLASH_SECTOR_SIZE 4096
 
+#define ATOMIC_ALIAS_MASK 0x3000
+#define ATOMIC_XOR        0x1000
+#define ATOMIC_SET        0x2000
+#define ATOMIC_CLR        0x3000
+
+static uint32_t rp2040_xip_apply_alias(uint32_t old, uint32_t value,
+                                       hwaddr alias)
+{
+    switch (alias) {
+    case ATOMIC_XOR:
+        return old ^ value;
+    case ATOMIC_SET:
+        return old | value;
+    case ATOMIC_CLR:
+        return old & ~value;
+    default:
+        return value;
+    }
+}
+
 static void rp2040_xip_rx_clear(RP2040XipState *s)
 {
     s->rx_len = 0;
@@ -250,9 +270,10 @@ static MemTxResult rp2040_xip_write(void *opaque, hwaddr addr, uint64_t data,
 static uint64_t rp2040_xip_ctrl_read(void *opaque, hwaddr addr, unsigned size)
 {
     RP2040XipState *s = opaque;
+    hwaddr offset = addr & 0xfff;
     uint64_t value;
 
-    switch (addr) {
+    switch (offset) {
     case 0x00:
         value = s->xip_ctrl;
         break;
@@ -269,9 +290,9 @@ static uint64_t rp2040_xip_ctrl_read(void *opaque, hwaddr addr, unsigned size)
 
     qemu_log_mask(LOG_UNIMP, "rp2040.xip.ctrl: read  "
                   "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%03" HWADDR_PRIx
+                  ", offset 0x%04" HWADDR_PRIx
                   ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_XIP_CTRL_BASE + addr, addr,
+                  size, RP2040_XIP_CTRL_BASE + addr, offset,
                   size << 1, value);
 
     return value;
@@ -281,11 +302,15 @@ static void rp2040_xip_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
                                   unsigned size)
 {
     RP2040XipState *s = opaque;
+    hwaddr alias = addr & ATOMIC_ALIAS_MASK;
+    hwaddr offset = addr & 0xfff;
+    uint32_t new_value;
 
-    switch (addr) {
+    switch (offset) {
     case 0x00:
-        s->xip_ctrl = value & (RP2040_XIP_CTRL_EN |
-                               RP2040_XIP_CTRL_ERR_BADWRITE);
+        new_value = rp2040_xip_apply_alias(s->xip_ctrl, value, alias);
+        s->xip_ctrl = new_value & (RP2040_XIP_CTRL_EN |
+                                   RP2040_XIP_CTRL_ERR_BADWRITE);
         break;
     case 0x0c:
     case 0x10:
@@ -296,20 +321,21 @@ static void rp2040_xip_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
 
     qemu_log_mask(LOG_UNIMP, "rp2040.xip.ctrl: write "
                   "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%03" HWADDR_PRIx
+                  ", offset 0x%04" HWADDR_PRIx
                   ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_XIP_CTRL_BASE + addr, addr,
+                  size, RP2040_XIP_CTRL_BASE + addr, offset,
                   size << 1, value);
 }
 
 static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
 {
     RP2040XipState *s = opaque;
+    hwaddr offset = addr & 0xfff;
     uint8_t value;
     uint32_t risr = s->rx_len > s->rx_pos ? 0 : 1;
     uint64_t ret;
 
-    if (addr >= RP2040_SSI_DR0 && addr <= RP2040_SSI_DR_END) {
+    if (offset >= RP2040_SSI_DR0 && offset <= RP2040_SSI_DR_END) {
         if (s->rx_pos < s->rx_len) {
             value = s->rx[s->rx_pos++];
             if (s->rx_pos == s->rx_len) {
@@ -321,14 +347,14 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
         }
         qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: read  "
                       "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%03" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
                       ") -> 0x%0*" PRIx64 "\n",
-                      size, RP2040_XIP_SSI_BASE + addr, addr,
+                      size, RP2040_XIP_SSI_BASE + addr, offset,
                       size << 1, ret);
         return ret;
     }
 
-    switch (addr) {
+    switch (offset) {
     case RP2040_SSI_CTRLR0:
         ret = s->ctrlr0;
         break;
@@ -393,9 +419,9 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
 
     qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: read  "
                   "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%03" HWADDR_PRIx
+                  ", offset 0x%04" HWADDR_PRIx
                   ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_XIP_SSI_BASE + addr, addr,
+                  size, RP2040_XIP_SSI_BASE + addr, offset,
                   size << 1, ret);
 
     return ret;
@@ -405,53 +431,62 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
                                  unsigned size)
 {
     RP2040XipState *s = opaque;
+    hwaddr alias = addr & ATOMIC_ALIAS_MASK;
+    hwaddr offset = addr & 0xfff;
     uint32_t old_ser = s->ser;
+    uint32_t new_value;
 
-    if (addr >= RP2040_SSI_DR0 && addr <= RP2040_SSI_DR_END) {
+    if (offset >= RP2040_SSI_DR0 && offset <= RP2040_SSI_DR_END) {
         rp2040_xip_dr_write(s, value & 0xff);
         qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: write "
                       "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%03" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
                       ", value 0x%0*" PRIx64 ")\n",
-                      size, RP2040_XIP_SSI_BASE + addr, addr,
+                      size, RP2040_XIP_SSI_BASE + addr, offset,
                       size << 1, value);
         return;
     }
 
-    switch (addr) {
+    switch (offset) {
     case RP2040_SSI_CTRLR0:
-        s->ctrlr0 = value;
+        s->ctrlr0 = rp2040_xip_apply_alias(s->ctrlr0, value, alias);
         break;
     case RP2040_SSI_CTRLR1:
-        s->ctrlr1 = value;
+        s->ctrlr1 = rp2040_xip_apply_alias(s->ctrlr1, value, alias);
         break;
     case RP2040_SSI_SSIENR:
-        s->ssienr = value & 1;
+        new_value = rp2040_xip_apply_alias(s->ssienr, value, alias);
+        s->ssienr = new_value & 1;
         if (!s->ssienr) {
             rp2040_xip_rx_clear(s);
             rp2040_xip_reset_tx(s);
         }
         break;
     case RP2040_SSI_SER:
-        s->ser = value & 1;
+        new_value = rp2040_xip_apply_alias(s->ser, value, alias);
+        s->ser = new_value & 1;
         if ((old_ser & 1) && !s->ser) {
             rp2040_xip_finish_command(s);
         }
         break;
     case RP2040_SSI_BAUDR:
-        s->baudr = value & 0xffff;
+        new_value = rp2040_xip_apply_alias(s->baudr, value, alias);
+        s->baudr = new_value & 0xffff;
         break;
     case RP2040_SSI_TXFTLR:
-        s->txftlr = value & 0xff;
+        new_value = rp2040_xip_apply_alias(s->txftlr, value, alias);
+        s->txftlr = new_value & 0xff;
         break;
     case RP2040_SSI_RXFTLR:
-        s->rxftlr = value & 0xff;
+        new_value = rp2040_xip_apply_alias(s->rxftlr, value, alias);
+        s->rxftlr = new_value & 0xff;
         break;
     case RP2040_SSI_IMR:
-        s->imr = value & 0x3f;
+        new_value = rp2040_xip_apply_alias(s->imr, value, alias);
+        s->imr = new_value & 0x3f;
         break;
     case RP2040_SSI_SPI_CTRLR0:
-        s->spi_ctrlr0 = value;
+        s->spi_ctrlr0 = rp2040_xip_apply_alias(s->spi_ctrlr0, value, alias);
         break;
     default:
         break;
@@ -459,9 +494,9 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
 
     qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: write "
                   "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%03" HWADDR_PRIx
+                  ", offset 0x%04" HWADDR_PRIx
                   ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_XIP_SSI_BASE + addr, addr,
+                  size, RP2040_XIP_SSI_BASE + addr, offset,
                   size << 1, value);
 }
 

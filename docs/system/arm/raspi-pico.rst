@@ -90,9 +90,10 @@ and the XOSC stability poll on ``rp2040.xosc`` offset ``0x04``
 offset ``0x08`` (``0x4000c008``) also completes.  The current observed tight
 polling loop on ``rp2040.pll_sys`` offset ``0x00`` (``0x40028000``) also
 completes.  The ROM then switches ``clk_sys`` to the PLL path, writes
-watchdog scratch registers, and reaches a HardFault on ``0x14003000``.  This
-is the next bring-up target and appears to be an XIP alias/cache view rather
-than a PLL issue.
+watchdog scratch registers, and clears ``XIP_CTRL.CTRL.EN`` through the
+atomic clear alias at ``0x14003000``.  The current bring-up blocker is a
+later invalid-state fault after the ROM populates ``USBCTRL_DPRAM`` and reads
+back callback pointers from the still-unimplemented DPRAM model.
 
 Clock and XOSC model
 --------------------
@@ -250,10 +251,11 @@ Known limitations
  * Only core 0 is modeled.
  * UART0 currently uses QEMU's PL011 model directly, with the RP2040
    compatibility policy documented above.
- * The XIP cache, XIP aliases, streaming FIFO and detailed timing are not yet
-   modeled.
+ * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
+   XIP control and SSI APB register blocks do handle the RP2040 atomic
+   ``XOR``/``SET``/``CLR`` aliases.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.
  * USB, PIO, DMA, watchdog and most peripherals are not yet implemented.  The
-   current real mask ROM blocker is a HardFault on ``0x14003000`` after
-   ``PLL_SYS`` setup.
+   current real mask ROM blocker is an invalid-state fault after USB DPRAM
+   setup because the placeholder DPRAM device does not retain written data.
