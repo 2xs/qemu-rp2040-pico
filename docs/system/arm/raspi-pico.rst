@@ -114,7 +114,8 @@ ROM.  ``PROC0_NMI_MASK`` reroutes connected interrupt sources to the
 Cortex-M0+ NMI input, and ``MEMPOWERDOWN`` disables ROM, SRAM bank and USB
 DPRAM windows by returning memory transaction errors.  ``VREG_AND_CHIP_RESET``
 exposes the voltage-regulator, brown-out detector and chip reset status
-registers with stable shallow behaviour.
+registers with stable shallow behaviour.  ``TBMAN.PLATFORM`` reports the
+documented ASIC platform bit.
 
 Clock and XOSC model
 --------------------
@@ -164,6 +165,19 @@ impedance mode, and stores the software-visible Rescue Debug Port flag in
 ``CHIP_RESET``.  Watchdog reset cause is reported by the watchdog block's
 ``REASON`` register; it is not reflected in ``CHIP_RESET`` because the
 documented ``CHIP_RESET`` source fields do not include watchdog reset.
+
+TBMAN model
+-----------
+
+The RP2040 datasheet describes ``TBMAN`` as a testbench manager used during
+chip development simulations.  On real hardware it only exposes a
+``PLATFORM`` register indicating that the platform is ASIC; this is duplicated
+by ``SYSINFO.PLATFORM``.  See datasheet pages 309 to 310.
+
+The current QEMU model implements this real-chip subset and returns
+``TBMAN.PLATFORM.ASIC`` set.  It deliberately does not expose testbench
+simulation controls, because those controls would imply a simulation
+environment outside the RP2040 SoC model.
 
 PLL model
 ---------
@@ -304,6 +318,7 @@ Known limitations
  * ``VREG_AND_CHIP_RESET`` stores the voltage-regulator and brown-out detector
    control fields and exposes stable chip reset status.  Analog regulator and
    brown-out behaviour is not modeled.
+ * ``TBMAN`` exposes only the documented real-chip ``PLATFORM`` register.
  * The watchdog models ``CTRL``, ``LOAD``, ``REASON``, ``SCRATCH`` and
    ``TICK``, including ``CTRL.TRIGGER`` and the RP2040-E1 double-decrement
    behaviour.  Debug pause inputs are stored but not connected to a debug

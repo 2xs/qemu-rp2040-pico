@@ -318,6 +318,8 @@ Current clock/reset bring-up note:
   registers with RP2040 atomic aliases. `VREG.ROK` is reported stable when
   the regulator is enabled, and watchdog reset cause remains in
   `WATCHDOG.REASON` rather than `CHIP_RESET`.
+- `TBMAN` now returns the documented real-chip `PLATFORM.ASIC` bit. QEMU does
+  not expose testbench simulation controls.
 - `SYSINFO` now returns stable `CHIP_ID`, `PLATFORM`, and `GITREF_RP2040`
   values. `SYSCFG` now stores the documented processor NMI/configuration,
   input synchronizer bypass, debug-force, and memory-powerdown registers.
