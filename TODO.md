@@ -338,6 +338,11 @@ Current clock/reset bring-up note:
   `TICK`, schedules a QEMU virtual-time timeout from `clk_ref / TICK.CYCLES`,
   applies the RP2040-E1 double-decrement behavior, and uses QEMU's watchdog
   action path for both timer expiry and `CTRL.TRIGGER`.
+- The SIO block now provides `CPUID`, user GPIO and QSPI `GPIO_HI`
+  output/output-enable registers with set/clear/xor operations, empty
+  single-core FIFO status, and simple hardware spinlock claim/release
+  semantics. The inter-core FIFO datapath, divider, and interpolators remain
+  future work.
 
 ## Phase 13: Documentation
 
@@ -365,7 +370,7 @@ Current clock/reset bring-up note:
 ## Phase 15: Post-Integration Roadmap
 
 - [ ] Add the second Cortex-M0+ properly.
-- [ ] Add SIO and inter-core FIFO.
+- [ ] Add full SIO and inter-core FIFO.
 - [ ] Improve timer fidelity.
 - [x] Improve watchdog/reset behavior.
 - [ ] Improve SSI/QSPI fidelity.

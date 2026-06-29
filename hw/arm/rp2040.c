@@ -91,7 +91,6 @@ static const struct {
     { "rp2040.dma",      0x50000000, 0x1000 },
     { "rp2040.pio0",     0x50200000, 0x10000 },
     { "rp2040.pio1",     0x50300000, 0x10000 },
-    { "rp2040.sio",      0xd0000000, 0x1000 },
 };
 
 static uint32_t rp2040_apply_atomic_alias(uint32_t old, uint32_t value,
@@ -290,6 +289,7 @@ static void rp2040_soc_init(Object *obj)
 
     object_initialize_child(obj, "resets", &s->resets, TYPE_RP2040_RESETS);
     object_initialize_child(obj, "rosc", &s->rosc, TYPE_RP2040_ROSC);
+    object_initialize_child(obj, "sio", &s->sio, TYPE_RP2040_SIO);
     object_initialize_child(obj, "syscfg", &s->syscfg, TYPE_RP2040_SYSCFG);
     object_initialize_child(obj, "sysinfo", &s->sysinfo, TYPE_RP2040_SYSINFO);
     object_initialize_child(obj, "tbman", &s->tbman, TYPE_RP2040_TBMAN);
@@ -383,6 +383,11 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->rosc), 0, RP2040_ROSC_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->sio), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->sio), 0, RP2040_SIO_BASE);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->syscfg), errp)) {
         return;
