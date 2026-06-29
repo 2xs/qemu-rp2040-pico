@@ -136,6 +136,16 @@ immediately once XOSC is enabled and awake, keeps ``BADWRITE`` sticky until
 cleared, and implements the documented ``STARTUP``, ``DORMANT`` and
 ``COUNT`` registers at the level needed by early boot.
 
+The ring oscillator model follows the programmer-visible register layout
+described by the datasheet: ``CTRL``, ``FREQA``, ``FREQB``, ``DORMANT``,
+``DIV``, ``PHASE``, ``STATUS``, ``RANDOMBIT`` and ``COUNT``.  See datasheet
+pages 221 to 227.  QEMU models a stable nominal ROSC and updates a QEMU
+``Clock`` output from the visible enable/dormant/divider state.  ``COUNT`` is
+derived from QEMU virtual time rather than CPU cycles; in normal execution
+this follows elapsed host time, while in ``icount`` mode it follows QEMU's
+deterministic virtual clock.  The model does not emulate analog frequency
+variation with process, voltage or temperature.
+
 Reset controller model
 ----------------------
 
@@ -304,6 +314,9 @@ Known limitations
  * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
    XIP control and SSI APB register blocks do handle the RP2040 atomic
    ``XOR``/``SET``/``CLR`` aliases.
+ * The ROSC model exposes stable register behaviour and a nominal clock.  It
+   does not model analog frequency variation or true entropy from
+   ``RANDOMBIT``.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.
  * USB, PIO, DMA and most peripherals are not yet implemented.  USB DPRAM is

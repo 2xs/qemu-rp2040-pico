@@ -89,7 +89,6 @@ static const struct {
     { "rp2040.pwm",      0x40050000, 0x4000 },
     { "rp2040.timer",    0x40054000, 0x4000 },
     { "rp2040.rtc",      0x4005c000, 0x4000 },
-    { "rp2040.rosc",     0x40060000, 0x4000 },
     { "rp2040.dma",      0x50000000, 0x1000 },
     { "rp2040.pio0",     0x50200000, 0x10000 },
     { "rp2040.pio1",     0x50300000, 0x10000 },
@@ -290,6 +289,7 @@ static void rp2040_soc_init(Object *obj)
     qdev_prop_set_uint32(DEVICE(&s->pll_usb), "fallback-hz", 48000000);
 
     object_initialize_child(obj, "resets", &s->resets, TYPE_RP2040_RESETS);
+    object_initialize_child(obj, "rosc", &s->rosc, TYPE_RP2040_ROSC);
     object_initialize_child(obj, "syscfg", &s->syscfg, TYPE_RP2040_SYSCFG);
     object_initialize_child(obj, "sysinfo", &s->sysinfo, TYPE_RP2040_SYSINFO);
     object_initialize_child(obj, "tbman", &s->tbman, TYPE_RP2040_TBMAN);
@@ -373,6 +373,11 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->resets), 0, RP2040_RESETS_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->rosc), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->rosc), 0, RP2040_ROSC_BASE);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->syscfg), errp)) {
         return;

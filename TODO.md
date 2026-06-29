@@ -304,6 +304,10 @@ Current clock/reset bring-up note:
   modeling reset propagation delay.
 - The RFC `pipico.rom` no longer blocks on `RESET_DONE` or `pll_sys` offset
   `0x00` (`0x40028000`).
+- `ROSC` now exposes the documented control, frequency, dormant, divider,
+  phase, status, random-bit, and count registers. Its `COUNT` register is
+  derived from QEMU virtual time rather than CPU cycles, and the model
+  publishes a nominal QEMU `Clock` output.
 - The PLL model is intentionally shallow: it stores `CS`, `PWR`,
   `FBDIV_INT`, and `PRIM`, applies the RP2040 atomic aliases, reports
   `CS.LOCK` immediately when the PLL is powered, and publishes a calculated
