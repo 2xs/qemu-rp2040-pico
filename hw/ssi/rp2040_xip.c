@@ -98,6 +98,12 @@ static void rp2040_xip_rx_clear(RP2040XipState *s)
 
 static void rp2040_xip_rx_push(RP2040XipState *s, uint8_t value)
 {
+    if (s->rx_len == ARRAY_SIZE(s->rx) && s->rx_pos > 0) {
+        memmove(s->rx, s->rx + s->rx_pos, s->rx_len - s->rx_pos);
+        s->rx_len -= s->rx_pos;
+        s->rx_pos = 0;
+    }
+
     if (s->rx_len < ARRAY_SIZE(s->rx)) {
         s->rx[s->rx_len++] = value;
     }
@@ -259,13 +265,21 @@ static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
         rp2040_xip_reset_tx(s);
         break;
     case FLASH_CMD_READ:
-        if (s->tx_len >= 4) {
-            addr = rp2040_xip_tx_addr(s) + s->tx_len - 4;
+        if (s->tx_len <= 4) {
+            rp2040_xip_rx_push(s, 0);
+        } else {
+            addr = rp2040_xip_tx_addr(s) + s->tx_len - 5;
             rp2040_xip_rx_push(s, addr < s->flash_size ?
                                s->storage[addr] : 0xff);
         }
         break;
     default:
+        /*
+         * The RP2040 boot ROM performs small full-duplex SSI transactions
+         * while probing the flash path. Even for commands we do not model yet,
+         * a transmitted byte clocks one receive byte back from the bus.
+         */
+        rp2040_xip_rx_push(s, 0);
         break;
     }
 }
