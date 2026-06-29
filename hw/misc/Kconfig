@@ -110,6 +110,9 @@ config RP2040_PLL
 config RP2040_RESETS
     bool
 
+config RP2040_WATCHDOG
+    bool
+
 config RP2040_XOSC
     bool
 

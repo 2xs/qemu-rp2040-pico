@@ -282,9 +282,9 @@ Current persistence note:
 - [x] Avoid claiming full RP2040 clock fidelity.
 - [x] Add a minimal reset-controller model for `RESET_DONE`.
 - [x] Add minimal PLL_SYS/PLL_USB register models for `CS.LOCK` polling.
-- [ ] Add minimal watchdog/timer behavior only when needed by boot ROM or
-  firmware tests.
-- [ ] Add regression tests for any behavior required by firmware boot.
+- [x] Add RP2040 watchdog countdown, software trigger, reason, scratch, and
+  tick-generator behavior.
+- [x] Add regression tests for watchdog behavior required by firmware boot.
 
 Current clock/reset bring-up note:
 
@@ -314,6 +314,10 @@ Current clock/reset bring-up note:
   XIP control alias access. The USB data DPRAM is now backed by RAM and
   `USBCTRL_REGS` stores the registers touched by the boot ROM, including
   atomic aliases. Full USB signaling and packet handling remain future work.
+- The watchdog block now models `CTRL`, `LOAD`, `REASON`, `SCRATCH`, and
+  `TICK`, schedules a QEMU virtual-time timeout from `clk_ref / TICK.CYCLES`,
+  applies the RP2040-E1 double-decrement behavior, and uses QEMU's watchdog
+  action path for both timer expiry and `CTRL.TRIGGER`.
 
 ## Phase 13: Documentation
 
@@ -343,7 +347,7 @@ Current clock/reset bring-up note:
 - [ ] Add the second Cortex-M0+ properly.
 - [ ] Add SIO and inter-core FIFO.
 - [ ] Improve timer fidelity.
-- [ ] Improve watchdog/reset behavior.
+- [x] Improve watchdog/reset behavior.
 - [ ] Improve SSI/QSPI fidelity.
 - [ ] Support a more faithful boot ROM flow.
 - [ ] Expand Pico SDK compatibility.

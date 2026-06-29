@@ -271,6 +271,10 @@ Known limitations
    ``XOR``/``SET``/``CLR`` aliases.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.
- * USB, PIO, DMA, watchdog and most peripherals are not yet implemented.  USB
-   DPRAM is present as RAM and ``USBCTRL_REGS`` stores register state, but USB
+ * USB, PIO, DMA and most peripherals are not yet implemented.  USB DPRAM is
+   present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.
+ * The watchdog models ``CTRL``, ``LOAD``, ``REASON``, ``SCRATCH`` and
+   ``TICK``, including ``CTRL.TRIGGER`` and the RP2040-E1 double-decrement
+   behaviour.  Debug pause inputs are stored but not connected to a debug
+   fabric model.
