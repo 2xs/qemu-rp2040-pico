@@ -15,6 +15,7 @@
 #include "hw/core/irq.h"
 #include "hw/core/sysbus.h"
 #include "hw/misc/rp2040_clocks.h"
+#include "hw/misc/rp2040_ioqspi.h"
 #include "hw/misc/rp2040_pll.h"
 #include "hw/misc/rp2040_resets.h"
 #include "hw/misc/rp2040_rosc.h"
@@ -51,6 +52,7 @@ struct RP2040State {
     ARMv7MState armv7m;
     PL011State uart0;
     RP2040ClocksState clocks;
+    RP2040IoQspiState ioqspi;
     RP2040PllState pll_sys;
     RP2040PllState pll_usb;
     RP2040ResetsState resets;
