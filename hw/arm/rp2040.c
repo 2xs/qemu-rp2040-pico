@@ -90,7 +90,6 @@ static const struct {
     { "rp2040.adc",      0x4004c000, 0x4000 },
     { "rp2040.pwm",      0x40050000, 0x4000 },
     { "rp2040.timer",    0x40054000, 0x4000 },
-    { "rp2040.watchdog", 0x40058000, 0x4000 },
     { "rp2040.rtc",      0x4005c000, 0x4000 },
     { "rp2040.rosc",     0x40060000, 0x4000 },
     { "rp2040.vreg_and_chip_reset", 0x40064000, 0x4000 },
@@ -215,6 +214,8 @@ static void rp2040_soc_init(Object *obj)
     qdev_prop_set_uint32(DEVICE(&s->pll_usb), "fallback-hz", 48000000);
 
     object_initialize_child(obj, "resets", &s->resets, TYPE_RP2040_RESETS);
+    object_initialize_child(obj, "watchdog", &s->watchdog,
+                            TYPE_RP2040_WATCHDOG);
     object_initialize_child(obj, "xosc", &s->xosc, TYPE_RP2040_XOSC);
 
     s->sysclk = clock_new(obj, "sysclk");
@@ -285,6 +286,13 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->resets), 0, RP2040_RESETS_BASE);
+
+    qdev_connect_clock_in(DEVICE(&s->watchdog), "clk-ref",
+                          qdev_get_clock_out(DEVICE(&s->clocks), "clk-ref"));
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->watchdog), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->watchdog), 0, RP2040_WATCHDOG_BASE);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->xosc), errp)) {
         return;

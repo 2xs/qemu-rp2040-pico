@@ -16,6 +16,7 @@
 #include "hw/misc/rp2040_clocks.h"
 #include "hw/misc/rp2040_pll.h"
 #include "hw/misc/rp2040_resets.h"
+#include "hw/misc/rp2040_watchdog.h"
 #include "hw/misc/rp2040_xosc.h"
 #include "hw/ssi/rp2040_xip.h"
 #include "qom/object.h"
@@ -46,6 +47,7 @@ struct RP2040State {
     RP2040PllState pll_sys;
     RP2040PllState pll_usb;
     RP2040ResetsState resets;
+    RP2040WatchdogState watchdog;
     RP2040XoscState xosc;
     RP2040XipState xip;
 

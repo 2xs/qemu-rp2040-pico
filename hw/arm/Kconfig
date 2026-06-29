@@ -380,6 +380,7 @@ config RP2040
     select RP2040_CLOCKS
     select RP2040_PLL
     select RP2040_RESETS
+    select RP2040_WATCHDOG
     select RP2040_XIP
     select RP2040_XOSC
     select UNIMP

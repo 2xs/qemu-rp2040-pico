@@ -98,6 +98,7 @@ system_ss.add(when: 'CONFIG_RASPI', if_true: files(
 system_ss.add(when: 'CONFIG_RP2040_CLOCKS', if_true: files('rp2040_clocks.c'))
 system_ss.add(when: 'CONFIG_RP2040_PLL', if_true: files('rp2040_pll.c'))
 system_ss.add(when: 'CONFIG_RP2040_RESETS', if_true: files('rp2040_resets.c'))
+system_ss.add(when: 'CONFIG_RP2040_WATCHDOG', if_true: files('rp2040_watchdog.c'))
 system_ss.add(when: 'CONFIG_RP2040_XOSC', if_true: files('rp2040_xosc.c'))
 system_ss.add(when: 'CONFIG_SLAVIO', if_true: files('slavio_misc.c'))
 system_ss.add(when: 'CONFIG_ZYNQ', if_true: files('zynq_slcr.c'))
