@@ -350,12 +350,63 @@ Current clock/reset bring-up note:
   NVIC delivery. The counter uses QEMU virtual time rather than CPU-cycle
   timing, and pause/debug side effects remain minimal.
 - The SIO block now provides `CPUID`, user GPIO and QSPI `GPIO_HI`
-  output/output-enable registers with set/clear/xor operations, empty
-  single-core FIFO status, and simple hardware spinlock claim/release
-  semantics. The inter-core FIFO datapath, divider, and interpolators remain
-  future work.
+  output/output-enable registers with set/clear/xor operations, 8-entry
+  inter-core FIFOs, FIFO `VLD`/`RDY`/`ROE`/`WOF` status, proc0 FIFO IRQ
+  output, and simple hardware spinlock claim/release semantics. Core1 is not
+  instantiated yet, so the proc1 FIFO IRQ output is intentionally not routed.
+  The divider, interpolators, and SDK core1 launch protocol remain future
+  work.
 
-## Phase 13: Documentation
+## Phase 13: SIO Multicore Groundwork
+
+- [x] Make `SIO_CPUID` depend on QEMU's current guest vCPU context.
+- [x] Add 8-entry inter-core FIFO storage for both directions.
+- [x] Implement FIFO `VLD`, `RDY`, `ROE`, and `WOF` status semantics.
+- [x] Implement `FIFO_WR` push to the peer core and `FIFO_RD` pop from the
+  current core.
+- [x] Add FIFO IRQ outputs for proc0/proc1.
+- [x] Route only proc0 FIFO IRQ while the model still has one Cortex-M0+.
+- [x] Add a functional test for core0-visible SIO FIFO status and sticky bits.
+- [ ] Add qtest coverage that can exercise both FIFO directions without
+  requiring a second Cortex-M0+ to execute guest code.
+
+Current multicore groundwork note:
+
+- SIO uses QEMU's `current_cpu` thread-local guest vCPU pointer to determine
+  whether an MMIO access comes from proc0 or proc1. This is a QEMU guest CPU
+  service, not the host machine CPU id.
+- The proc1 FIFO IRQ output is intentionally left unrouted until a second
+  ARMv7M instance exists.
+
+## Phase 14: Instantiate Cortex-M0+ Proc1
+
+- [ ] Split the current single `ARMv7MState armv7m` into proc0/proc1 state
+  while preserving proc0 behavior.
+- [ ] Keep proc1 held in reset or dormant after machine reset.
+- [ ] Wire proc1 to the shared RP2040 memory map and `clk_sys`.
+- [ ] Add separate IRQ and NMI routing for proc0 and proc1.
+- [ ] Route `SIO_IRQ_PROC1` only to proc1.
+- [ ] Ensure proc0 boot, UART, flash, timer, watchdog, and boot ROM tests still
+  pass unchanged.
+- [ ] Document that dual-core scheduling is functional, not cycle-accurate.
+
+## Phase 15: SDK-Compatible Core1 Launch
+
+- [ ] Model the reset/power path used by Pico SDK `multicore_reset_core1()`,
+  including the `PSM_FRCE_OFF_PROC1` behavior or an equivalent documented
+  minimal shim.
+- [ ] Support the Pico SDK FIFO launch sequence `{0, 0, 1, VTOR, SP, PC}`.
+- [ ] Start proc1 with the provided vector table, stack pointer, and entry
+  point.
+- [ ] Implement enough event/wakeup behavior for the SDK `SEV`/`WFE` launch
+  loop to complete.
+- [ ] Add a bare-metal functional test where proc0 launches proc1 and receives
+  an acknowledgement through SIO FIFO.
+- [ ] Add a Pico SDK multicore hello-world test once the SDK fixture is stable.
+- [ ] Document remaining limitations: timing, lockout behavior, flash-write
+  lockout interactions, divider/interpolator coverage, and reset fidelity.
+
+## Phase 16: Documentation
 
 - [x] Add user documentation for the `raspi-pico` machine.
 - [x] Document RAM size.
@@ -368,7 +419,7 @@ Current clock/reset bring-up note:
 - [x] Document known limitations.
 - [x] Add short developer notes explaining simplified versus faithful RP2040 behavior.
 
-## Phase 14: Patch Series Preparation
+## Phase 17: Patch Series Preparation
 
 - [ ] Split the work into small reviewable commits.
 - [ ] Keep SoC skeleton, machine, memory map, firmware loading, UART, tests, flash, persistence, and docs separate where practical.
@@ -378,10 +429,9 @@ Current clock/reset bring-up note:
 - [ ] Prepare the first submission as RFC if the model is still minimal.
 - [ ] State clearly that this is not complete RP2040 emulation.
 
-## Phase 15: Post-Integration Roadmap
+## Phase 18: Post-Integration Roadmap
 
-- [ ] Add the second Cortex-M0+ properly.
-- [ ] Add full SIO and inter-core FIFO.
+- [ ] Add full SIO divider and interpolator datapaths.
 - [ ] Improve timer fidelity.
 - [x] Improve watchdog/reset behavior.
 - [ ] Improve SSI/QSPI fidelity.
