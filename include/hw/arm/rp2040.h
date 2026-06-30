@@ -46,12 +46,13 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040State, RP2040)
 #define RP2040_USBCTRL_DPRAM_SIZE (4 * KiB)
 #define RP2040_USBCTRL_REGS_BASE  0x50110000
 #define RP2040_USBCTRL_REGS_SIZE  0x4000
+#define RP2040_NUM_CORES          2
 #define RP2040_NUM_IRQS           32
 
 struct RP2040State {
     SysBusDevice parent_obj;
 
-    ARMv7MState armv7m;
+    ARMv7MState armv7m[RP2040_NUM_CORES];
     PL011State uart0;
     RP2040ClocksState clocks;
     RP2040IoQspiState ioqspi;
@@ -70,6 +71,7 @@ struct RP2040State {
     RP2040XipState xip;
 
     MemoryRegion *board_memory;
+    MemoryRegion cpu_memory[RP2040_NUM_CORES];
     MemoryRegion rom;
     MemoryRegion rom_poweroff;
     MemoryRegion sram[6];
@@ -81,9 +83,9 @@ struct RP2040State {
     char *bootrom_file;
 
     qemu_irq *irq;
-    qemu_irq cpu_irq[RP2040_NUM_IRQS];
-    qemu_irq nmi_irq;
-    bool irq_level[RP2040_NUM_IRQS];
+    qemu_irq cpu_irq[RP2040_NUM_CORES][RP2040_NUM_IRQS];
+    qemu_irq nmi_irq[RP2040_NUM_CORES];
+    bool irq_level[RP2040_NUM_CORES][RP2040_NUM_IRQS];
     bool mempowerdown_ready;
 
     Clock *sysclk;

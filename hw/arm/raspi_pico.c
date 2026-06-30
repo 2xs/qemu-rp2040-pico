@@ -80,7 +80,7 @@ static void raspi_pico_init(MachineState *machine)
      */
     rp2040_xip_load_image(&s->soc.xip, machine->kernel_filename,
                           &error_fatal);
-    armv7m_load_kernel(s->soc.armv7m.cpu, NULL, RP2040_XIP_BASE, 2 * MiB);
+    armv7m_load_kernel(s->soc.armv7m[0].cpu, NULL, RP2040_XIP_BASE, 2 * MiB);
     rp2040_xip_set_writable(&s->soc.xip, false);
 }
 
@@ -97,7 +97,9 @@ static void raspi_pico_machine_class_init(ObjectClass *oc, const void *data)
 
     mc->desc = "Raspberry Pi Pico (Cortex-M0+)";
     mc->init = raspi_pico_init;
-    mc->max_cpus = 1;
+    mc->default_cpus = RP2040_NUM_CORES;
+    mc->min_cpus = RP2040_NUM_CORES;
+    mc->max_cpus = RP2040_NUM_CORES;
     mc->no_parallel = 1;
     mc->no_floppy = 1;
     mc->no_cdrom = 1;
