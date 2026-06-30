@@ -13,7 +13,7 @@ patches and adapting them to the current tree.
   QEMU tree instead of importing stale APIs verbatim.
 - [x] Keep the RFC `pc-bios/pipico.rom` image available locally for bring-up
   experiments.
-- [ ] Reconcile the RFC mask ROM loading logic with the current synthetic XIP
+- [x] Reconcile the RFC mask ROM loading logic with the current synthetic XIP
   boot path.
 - [ ] Prefer using the RFC implementation as-is when it still fits current
   QEMU APIs; otherwise debug and document the required adaptation.
@@ -31,8 +31,10 @@ Current RFC integration status:
   provenance answer.
 - RFC patch 0005 is adapted as the default mask ROM policy when no direct
   `-kernel`, explicit `-bios`, or raw `flash-file` image is supplied. The
-  current model keeps a synthetic boot ROM for direct XIP tests, while
-  `-bios` remains an explicit override.
+  current model keeps a synthetic boot ROM for direct `-kernel` bring-up, but
+  that ROM now expects and executes a boot2 block at `0x10000000` before
+  launching the application vectors at `0x10000100`. Explicit `-bios` remains
+  an override.
 - Mask ROM bring-up tracing is available with `-d unimp,guest_errors` and
   logs named RP2040 MMIO accesses, including absolute addresses. The first
   observed blocker, repeated polling of `rp2040.clocks` at `0x40008044`, is
@@ -117,8 +119,10 @@ Current temporary boot behavior:
   XIP loader, which accepts ELF images, Pico 1 UF2 images, and raw images as
   a fallback. The `armv7m_load_kernel()` helper is still used to register
   reset handling.
-- The synthetic ROM uses a fixed SRAM stack top, sets `VTOR` to the XIP vector
-  table, and branches to the reset handler from `0x10000004`.
+- The synthetic ROM uses a fixed SRAM stack top, copies the 256-byte boot2
+  block from `0x10000000` to SRAM at `0x20041f00`, calls it, then sets `VTOR`
+  to the application vector table at `0x10000100` and branches to the
+  application reset handler.
 - This is only a bring-up path; it is not a faithful RP2040 mask ROM model.
 
 ## Phase 5: Boot ROM Strategy

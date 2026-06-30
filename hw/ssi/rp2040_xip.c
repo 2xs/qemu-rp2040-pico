@@ -75,6 +75,13 @@
 #define ATOMIC_SET        0x2000
 #define ATOMIC_CLR        0x3000
 
+#define RP2040_BOOT2_SIZE 256
+#define RP2040_BOOT2_CRC_SIZE 252
+#define RP2040_BOOT2_CRC_INIT 0xffffffff
+#define RP2040_BOOT2_CRC_POLY 0x04c11db7
+#define RP2040_SRAM_BASE 0x20000000
+#define RP2040_SRAM_END  0x20042000
+
 static uint32_t rp2040_xip_apply_alias(uint32_t old, uint32_t value,
                                        hwaddr alias)
 {
@@ -163,6 +170,80 @@ static void rp2040_xip_writeback_or_warn(RP2040XipState *s)
     if (!rp2040_xip_writeback(s, &local_err)) {
         warn_report_err(local_err);
     }
+}
+
+static uint32_t rp2040_xip_boot2_crc(const uint8_t *data)
+{
+    uint32_t crc = RP2040_BOOT2_CRC_INIT;
+    int i;
+    int bit;
+
+    for (i = 0; i < RP2040_BOOT2_CRC_SIZE; i++) {
+        crc ^= (uint32_t)data[i] << 24;
+        for (bit = 0; bit < 8; bit++) {
+            if (crc & BIT(31)) {
+                crc = (crc << 1) ^ RP2040_BOOT2_CRC_POLY;
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+
+    return crc;
+}
+
+static bool rp2040_xip_boot2_empty(const uint8_t *data)
+{
+    int i;
+
+    for (i = 0; i < RP2040_BOOT2_SIZE; i++) {
+        if (data[i] != 0xff) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool rp2040_xip_boot2_looks_like_vector_table(const uint8_t *data)
+{
+    uint32_t initial_sp = ldl_le_p(data);
+    uint32_t reset = ldl_le_p(data + 4);
+
+    return initial_sp >= RP2040_SRAM_BASE &&
+           initial_sp <= RP2040_SRAM_END &&
+           reset >= RP2040_XIP_FLASH_BASE &&
+           reset < RP2040_XIP_FLASH_BASE + MiB &&
+           (reset & 1);
+}
+
+static bool rp2040_xip_fixup_boot2(RP2040XipState *s, const char *filename,
+                                   Error **errp)
+{
+    uint32_t crc;
+
+    if (s->flash_size < RP2040_BOOT2_SIZE) {
+        error_setg(errp, "flash is too small for an RP2040 boot2 block");
+        return false;
+    }
+
+    if (rp2040_xip_boot2_empty(s->storage)) {
+        error_setg(errp, "image '%s' does not contain RP2040 boot2 at "
+                   "0x%08x", filename, RP2040_XIP_FLASH_BASE);
+        return false;
+    }
+
+    if (rp2040_xip_boot2_looks_like_vector_table(s->storage)) {
+        error_setg(errp, "image '%s' starts with an application vector table, "
+                   "not RP2040 boot2; use a Pico SDK UF2 or an ELF with "
+                   "boot2 linked at 0x%08x", filename, RP2040_XIP_FLASH_BASE);
+        return false;
+    }
+
+    crc = rp2040_xip_boot2_crc(s->storage);
+    stl_le_p(s->storage + RP2040_BOOT2_CRC_SIZE, crc);
+
+    return true;
 }
 
 static void rp2040_xip_program(RP2040XipState *s)
@@ -760,6 +841,9 @@ void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
             error_propagate(errp, local_err);
             return;
         }
+        if (!rp2040_xip_fixup_boot2(s, filename, errp)) {
+            return;
+        }
         rp2040_xip_writeback(s, errp);
         return;
     }
@@ -769,6 +853,9 @@ void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
             error_propagate(errp, local_err);
             return;
         }
+        if (!rp2040_xip_fixup_boot2(s, filename, errp)) {
+            return;
+        }
         rp2040_xip_writeback(s, errp);
         return;
     }
@@ -776,6 +863,9 @@ void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
     image_size = load_image_size(filename, s->storage, s->flash_size);
     if (image_size < 0) {
         error_setg(errp, "could not load flash image '%s'", filename);
+        return;
+    }
+    if (!rp2040_xip_fixup_boot2(s, filename, errp)) {
         return;
     }
     rp2040_xip_writeback(s, errp);
