@@ -385,7 +385,7 @@ Current multicore groundwork note:
 - [x] Keep proc1 held in reset or dormant after machine reset.
 - [x] Wire proc1 to the shared RP2040 memory map and `clk_sys`.
 - [x] Add separate IRQ and NMI routing storage for proc0 and proc1.
-- [ ] Route `SIO_IRQ_PROC1` only to proc1.
+- [x] Route `SIO_IRQ_PROC1` only to proc1.
 - [x] Ensure proc0 boot, UART, flash, timer, watchdog, and boot ROM tests still
   pass unchanged.
 - [ ] Document that dual-core scheduling is functional, not cycle-accurate.
@@ -395,12 +395,12 @@ Current multicore groundwork note:
 - [x] Model the reset/power path used by Pico SDK `multicore_reset_core1()`,
   including the `PSM_FRCE_OFF_PROC1` behavior or an equivalent documented
   minimal shim.
-- [ ] Support the Pico SDK FIFO launch sequence `{0, 0, 1, VTOR, SP, PC}`.
-- [ ] Start proc1 with the provided vector table, stack pointer, and entry
+- [x] Support the Pico SDK FIFO launch sequence `{0, 0, 1, VTOR, SP, PC}`.
+- [x] Start proc1 with the provided vector table, stack pointer, and entry
   point.
-- [ ] Implement enough event/wakeup behavior for the SDK `SEV`/`WFE` launch
+- [x] Implement enough event/wakeup behavior for the SDK `SEV`/`WFE` launch
   loop to complete.
-- [ ] Add a bare-metal functional test where proc0 launches proc1 and receives
+- [x] Add a bare-metal functional test where proc0 launches proc1 and receives
   an acknowledgement through SIO FIFO.
 - [ ] Add a Pico SDK multicore hello-world test once the SDK fixture is stable.
 - [ ] Document remaining limitations: timing, lockout behavior, flash-write

@@ -16,11 +16,14 @@
 #include "hw/misc/unimp.h"
 #include "qemu/datadir.h"
 #include "qemu/log.h"
+#include "target/arm/cpu.h"
 #include "target/arm/cpu-qom.h"
 
 #define RP2040_UART0_BASE 0x40034000
 #define RP2040_UART0_IRQ  20
 #define RP2040_SIO_IRQ_PROC0 15
+#define RP2040_SIO_IRQ_PROC1 16
+#define RP2040_PROC1       1
 
 #define USBCTRL_ADDR_ENDP       0x00
 #define USBCTRL_SIE_CTRL        0x4c
@@ -209,15 +212,134 @@ static void rp2040_syscfg_update(void *opaque)
     rp2040_update_nmi(s);
 }
 
+typedef struct RP2040CoreLaunchInfo {
+    uint32_t vtor;
+    uint32_t sp;
+    uint32_t pc;
+} RP2040CoreLaunchInfo;
+
+static void rp2040_start_core1_async_work(CPUState *cs, run_on_cpu_data data)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+    CPUARMState *env = &cpu->env;
+    RP2040CoreLaunchInfo *info = data.host_ptr;
+
+    cpu_reset(cs);
+    env->v7m.vecbase[M_REG_NS] = info->vtor & 0xffffff80;
+    env->v7m.vecbase[M_REG_S] = info->vtor & 0xffffff80;
+    env->regs[13] = info->sp & 0xfffffffc;
+    env->regs[15] = info->pc & ~1u;
+    env->thumb = info->pc & 1;
+    cpu->power_state = PSCI_ON;
+    env->halt_reason = NOT_HALTED;
+    arm_rebuild_hflags(env);
+    cs->halted = 0;
+    cpu_resume(cs);
+
+    g_free(info);
+}
+
+static void rp2040_start_core1(RP2040State *s, uint32_t vtor,
+                               uint32_t sp, uint32_t pc)
+{
+    RP2040CoreLaunchInfo *info = g_new(RP2040CoreLaunchInfo, 1);
+
+    info->vtor = vtor;
+    info->sp = sp;
+    info->pc = pc;
+    async_run_on_cpu(CPU(s->armv7m[RP2040_PROC1].cpu),
+                     rp2040_start_core1_async_work,
+                     RUN_ON_CPU_HOST_PTR(info));
+}
+
+static void rp2040_stop_core1_async_work(CPUState *cs, run_on_cpu_data data)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+
+    cpu->power_state = PSCI_OFF;
+    cpu->env.halt_reason = HALT_PSCI;
+    cs->halted = 1;
+    cs->exception_index = EXCP_HLT;
+}
+
+static bool rp2040_core1_powered_off(RP2040State *s)
+{
+    ARMCPU *cpu = s->armv7m[RP2040_PROC1].cpu;
+
+    return !cpu || cpu->power_state == PSCI_OFF;
+}
+
+static void rp2040_stop_core1(RP2040State *s)
+{
+    if (!s->armv7m[RP2040_PROC1].cpu ||
+        rp2040_core1_powered_off(s)) {
+        return;
+    }
+
+    async_run_on_cpu(CPU(s->armv7m[RP2040_PROC1].cpu),
+                     rp2040_stop_core1_async_work,
+                     RUN_ON_CPU_NULL);
+}
+
+static void rp2040_core1_launch_fifo_write(void *opaque,
+                                           unsigned core,
+                                           uint32_t value)
+{
+    RP2040State *s = opaque;
+    static const uint32_t fixed_sequence[] = { 0, 0, 1 };
+
+    if (core != 0 || !s->core1_launch_ready ||
+        !rp2040_core1_powered_off(s)) {
+        return;
+    }
+
+    rp2040_sio_fifo_push_from_core(&s->sio, RP2040_PROC1, value);
+
+    switch (s->core1_launch_index) {
+    case 0:
+    case 1:
+    case 2:
+        if (value == fixed_sequence[s->core1_launch_index]) {
+            s->core1_launch_index++;
+        } else {
+            s->core1_launch_index = value == 0 ? 1 : 0;
+        }
+        break;
+    case 3:
+        s->core1_launch_vtor = value;
+        s->core1_launch_index++;
+        break;
+    case 4:
+        s->core1_launch_sp = value;
+        s->core1_launch_index++;
+        break;
+    case 5:
+        rp2040_start_core1(s, s->core1_launch_vtor,
+                           s->core1_launch_sp, value);
+        s->core1_launch_ready = false;
+        s->core1_launch_index = 0;
+        break;
+    default:
+        s->core1_launch_index = 0;
+        break;
+    }
+}
+
 static void rp2040_psm_update(void *opaque)
 {
     RP2040State *s = opaque;
+    bool proc1_forced_off = rp2040_psm_get_frce_off(&s->psm) &
+                            RP2040_PSM_PROC1;
 
-    /*
-     * FRCE_OFF_PROC1 is recorded by the PSM model.  Starting and stopping the
-     * second ARMv7M instance is handled by the later core1 launch step.
-     */
-    (void)rp2040_psm_get_frce_off(&s->psm);
+    s->core1_launch_index = 0;
+    if (proc1_forced_off) {
+        s->core1_launch_ready = false;
+        rp2040_stop_core1(s);
+    } else {
+        s->core1_launch_ready = true;
+        rp2040_sio_fifo_drain_core(&s->sio, RP2040_PROC1);
+        rp2040_sio_fifo_push_from_core(&s->sio, RP2040_PROC1, 0);
+    }
 }
 
 static void rp2040_set_irq(void *opaque, int irq, int level)
@@ -445,6 +567,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sio), 0, RP2040_SIO_BASE);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->sio), 0,
                        s->irq[RP2040_SIO_IRQ_PROC0]);
+    rp2040_sio_set_fifo_write_callback(&s->sio,
+                                       rp2040_core1_launch_fifo_write, s);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->syscfg), errp)) {
         return;
@@ -595,6 +719,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
                                                "NMI", 0);
     }
     rp2040_update_nmi(s);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sio), 1,
+                       s->cpu_irq[RP2040_PROC1][RP2040_SIO_IRQ_PROC1]);
 
     qdev_connect_clock_in(DEVICE(&s->uart0), "clk",
                           qdev_get_clock_out(DEVICE(&s->clocks), "clk-peri"));
