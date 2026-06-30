@@ -6,6 +6,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/misc/rp2040_sio.h"
+#include "hw/core/cpu.h"
 #include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
@@ -40,8 +41,79 @@
 
 #define SIO_GPIO_MASK           0x3fffffff
 #define SIO_GPIO_HI_MASK        0x3f
+#define SIO_FIFO_ST_VLD         BIT(0)
 #define SIO_FIFO_ST_RDY         BIT(1)
 #define SIO_FIFO_ST_WC_MASK     (BIT(3) | BIT(2))
+
+static unsigned rp2040_sio_current_core(void)
+{
+    /*
+     * current_cpu is QEMU's thread-local pointer to the currently executing
+     * guest vCPU, not a host CPU identifier.
+     */
+    if (current_cpu && current_cpu->cpu_index == 1) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static void rp2040_sio_update_fifo_irq(RP2040SioState *s)
+{
+    int i;
+
+    for (i = 0; i < RP2040_SIO_NUM_CORES; i++) {
+        qemu_set_irq(s->fifo_irq[i], s->fifo_level[i] != 0);
+    }
+}
+
+static uint32_t rp2040_sio_fifo_status(RP2040SioState *s, unsigned core)
+{
+    unsigned peer = core ^ 1;
+    uint32_t value = s->fifo_sticky[core] & SIO_FIFO_ST_WC_MASK;
+
+    if (s->fifo_level[core] != 0) {
+        value |= SIO_FIFO_ST_VLD;
+    }
+    if (s->fifo_level[peer] < RP2040_SIO_FIFO_DEPTH) {
+        value |= SIO_FIFO_ST_RDY;
+    }
+
+    return value;
+}
+
+static void rp2040_sio_fifo_push(RP2040SioState *s, unsigned core,
+                                 uint32_t value)
+{
+    unsigned peer = core ^ 1;
+
+    if (s->fifo_level[peer] == RP2040_SIO_FIFO_DEPTH) {
+        s->fifo_sticky[core] |= BIT(2);
+        return;
+    }
+
+    s->fifo[peer][s->fifo_wptr[peer]] = value;
+    s->fifo_wptr[peer] = (s->fifo_wptr[peer] + 1) % RP2040_SIO_FIFO_DEPTH;
+    s->fifo_level[peer]++;
+    rp2040_sio_update_fifo_irq(s);
+}
+
+static uint32_t rp2040_sio_fifo_pop(RP2040SioState *s, unsigned core)
+{
+    uint32_t value;
+
+    if (s->fifo_level[core] == 0) {
+        s->fifo_sticky[core] |= BIT(3);
+        return 0;
+    }
+
+    value = s->fifo[core][s->fifo_rptr[core]];
+    s->fifo_rptr[core] = (s->fifo_rptr[core] + 1) % RP2040_SIO_FIFO_DEPTH;
+    s->fifo_level[core]--;
+    rp2040_sio_update_fifo_irq(s);
+
+    return value;
+}
 
 static bool rp2040_sio_spinlock_offset(hwaddr offset, unsigned *index)
 {
@@ -57,12 +129,13 @@ static bool rp2040_sio_spinlock_offset(hwaddr offset, unsigned *index)
 static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
 {
     RP2040SioState *s = opaque;
+    unsigned core = rp2040_sio_current_core();
     unsigned index;
     uint64_t value;
 
     switch (addr) {
     case SIO_CPUID:
-        value = 0;
+        value = core;
         break;
     case SIO_GPIO_IN:
         value = s->gpio_in;
@@ -83,11 +156,10 @@ static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
         value = s->gpio_hi_oe;
         break;
     case SIO_FIFO_ST:
-        value = SIO_FIFO_ST_RDY | s->fifo_sticky;
+        value = rp2040_sio_fifo_status(s, core);
         break;
     case SIO_FIFO_RD:
-        s->fifo_sticky |= BIT(3);
-        value = 0;
+        value = rp2040_sio_fifo_pop(s, core);
         break;
     case SIO_SPINLOCK_ST:
         value = s->spinlock_st;
@@ -113,6 +185,7 @@ static void rp2040_sio_write(void *opaque, hwaddr addr,
                              uint64_t value64, unsigned size)
 {
     RP2040SioState *s = opaque;
+    unsigned core = rp2040_sio_current_core();
     unsigned index;
     uint32_t value = value64;
 
@@ -166,9 +239,10 @@ static void rp2040_sio_write(void *opaque, hwaddr addr,
         s->gpio_hi_oe ^= value & SIO_GPIO_HI_MASK;
         break;
     case SIO_FIFO_ST:
-        s->fifo_sticky &= ~(value & SIO_FIFO_ST_WC_MASK);
+        s->fifo_sticky[core] &= ~(value & SIO_FIFO_ST_WC_MASK);
         break;
     case SIO_FIFO_WR:
+        rp2040_sio_fifo_push(s, core, value);
         break;
     default:
         if (rp2040_sio_spinlock_offset(addr, &index)) {
@@ -204,8 +278,13 @@ static void rp2040_sio_reset(DeviceState *dev)
     s->gpio_oe = 0;
     s->gpio_hi_out = 0;
     s->gpio_hi_oe = 0;
-    s->fifo_sticky = 0;
+    memset(s->fifo, 0, sizeof(s->fifo));
+    memset(s->fifo_rptr, 0, sizeof(s->fifo_rptr));
+    memset(s->fifo_wptr, 0, sizeof(s->fifo_wptr));
+    memset(s->fifo_level, 0, sizeof(s->fifo_level));
+    memset(s->fifo_sticky, 0, sizeof(s->fifo_sticky));
     s->spinlock_st = 0;
+    rp2040_sio_update_fifo_irq(s);
 }
 
 static void rp2040_sio_init(Object *obj)
@@ -215,12 +294,14 @@ static void rp2040_sio_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &rp2040_sio_ops, s,
                           TYPE_RP2040_SIO, 0x1000);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->fifo_irq[0]);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->fifo_irq[1]);
 }
 
 static const VMStateDescription vmstate_rp2040_sio = {
     .name = TYPE_RP2040_SIO,
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32(gpio_out, RP2040SioState),
         VMSTATE_UINT32(gpio_in, RP2040SioState),
@@ -228,7 +309,16 @@ static const VMStateDescription vmstate_rp2040_sio = {
         VMSTATE_UINT32(gpio_oe, RP2040SioState),
         VMSTATE_UINT32(gpio_hi_out, RP2040SioState),
         VMSTATE_UINT32(gpio_hi_oe, RP2040SioState),
-        VMSTATE_UINT32(fifo_sticky, RP2040SioState),
+        VMSTATE_UINT32_2DARRAY(fifo, RP2040SioState, RP2040_SIO_NUM_CORES,
+                               RP2040_SIO_FIFO_DEPTH),
+        VMSTATE_UINT8_ARRAY(fifo_rptr, RP2040SioState,
+                            RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT8_ARRAY(fifo_wptr, RP2040SioState,
+                            RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT8_ARRAY(fifo_level, RP2040SioState,
+                            RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT32_ARRAY(fifo_sticky, RP2040SioState,
+                             RP2040_SIO_NUM_CORES),
         VMSTATE_UINT32(spinlock_st, RP2040SioState),
         VMSTATE_END_OF_LIST()
     }

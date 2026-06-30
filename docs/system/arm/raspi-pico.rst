@@ -116,9 +116,11 @@ DPRAM windows by returning memory transaction errors.  ``VREG_AND_CHIP_RESET``
 exposes the voltage-regulator, brown-out detector and chip reset status
 registers with stable shallow behaviour.  ``TBMAN.PLATFORM`` reports the
 documented ASIC platform bit.  ``SIO`` implements the core ID, the user and
-QSPI GPIO output/output-enable registers, mailbox status for the empty
-single-core case, and hardware spinlock claim/release semantics.  The SIO
-inter-core FIFO, divider and interpolator datapaths remain simplified.
+QSPI GPIO output/output-enable registers, 8-entry inter-core FIFOs,
+``VLD``/``RDY``/``ROE``/``WOF`` FIFO status, proc0 FIFO IRQ output, and
+hardware spinlock claim/release semantics.  Core1 is not instantiated yet, so
+the proc1 FIFO IRQ output is intentionally not routed.  The SIO divider,
+interpolator datapaths and SDK core1 launch protocol remain future work.
 
 Clock and XOSC model
 --------------------

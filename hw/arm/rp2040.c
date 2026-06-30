@@ -20,6 +20,7 @@
 
 #define RP2040_UART0_BASE 0x40034000
 #define RP2040_UART0_IRQ  20
+#define RP2040_SIO_IRQ_PROC0 15
 
 #define USBCTRL_ADDR_ENDP       0x00
 #define USBCTRL_SIE_CTRL        0x4c
@@ -419,6 +420,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sio), 0, RP2040_SIO_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->sio), 0,
+                       s->irq[RP2040_SIO_IRQ_PROC0]);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->syscfg), errp)) {
         return;
