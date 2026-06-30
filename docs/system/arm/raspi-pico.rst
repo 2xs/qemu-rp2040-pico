@@ -119,12 +119,12 @@ documented ASIC platform bit.  ``SIO`` implements the core ID, the user and
 QSPI GPIO output/output-enable registers, 8-entry inter-core FIFOs,
 ``VLD``/``RDY``/``ROE``/``WOF`` FIFO status, proc0 FIFO IRQ output, and
 hardware spinlock claim/release semantics.  Core1 is instantiated and starts
-powered off; the proc1 FIFO IRQ output is intentionally not routed until the
-core1 wake/reset path exists.  ``PSM`` exposes the force-on, force-off,
-watchdog-select and done registers touched by the Pico SDK core1 reset path;
-``FRCE_OFF_PROC1`` is stored and reflected in ``DONE``, but it does not yet
-start or stop the second CPU.  The SIO divider, interpolator datapaths and SDK
-core1 launch protocol remain future work.
+powered off.  Its FIFO IRQ output is routed to proc1, and a minimal mask-ROM
+launch shim supports the Pico SDK FIFO sequence ``{0, 0, 1, VTOR, SP, PC}``.
+``PSM`` exposes the force-on, force-off, watchdog-select and done registers
+touched by the Pico SDK core1 reset path; ``FRCE_OFF_PROC1`` is stored,
+reflected in ``DONE``, and used to hold or release proc1.  The SIO divider and
+interpolator datapaths remain future work.
 
 Clock and XOSC model
 --------------------
@@ -218,9 +218,9 @@ and then release it before the ROM FIFO launch protocol.  See datasheet pages
 The current QEMU model stores the documented bits 0..16, implements the
 RP2040 atomic alias windows, and derives ``DONE`` immediately as the inverse
 of ``FRCE_OFF``.  On reset, ``FRCE_OFF.PROC1`` is set to match the QEMU model
-where proc1 starts powered off.  Releasing this bit is visible to firmware but
-does not yet wake proc1; the SDK FIFO launch sequence is modeled separately in
-a later step.
+where proc1 starts powered off.  Releasing this bit drains proc1's incoming
+FIFO and pushes the ready ``0`` expected by the Pico SDK before the launch
+sequence.
 
 PLL model
 ---------
@@ -342,7 +342,8 @@ Known limitations
 -----------------
 
  * Core 0 runs normally.  Core 1 is instantiated and starts powered off; the
-   SDK-compatible wake and FIFO launch sequence is still in progress.
+   SDK-compatible wake and FIFO launch sequence is modeled by a QEMU shim,
+   not by executing the real mask ROM core1 path yet.
  * UART0 currently uses QEMU's PL011 model directly, with the RP2040
    compatibility policy documented above.
  * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
@@ -369,8 +370,8 @@ Known limitations
    brown-out behaviour is not modeled.
  * ``TBMAN`` exposes only the documented real-chip ``PLATFORM`` register.
  * ``PSM`` stores force-on, force-off and watchdog-select bits.  ``DONE`` is
-   derived immediately from ``FRCE_OFF``; power sequencing delays and actual
-   proc1 wakeup are not yet modeled.
+   derived immediately from ``FRCE_OFF``; analog power sequencing delays are
+   not modeled.
  * The watchdog models ``CTRL``, ``LOAD``, ``REASON``, ``SCRATCH`` and
    ``TICK``, including ``CTRL.TRIGGER`` and the RP2040-E1 double-decrement
    behaviour.  Debug pause inputs are stored but not connected to a debug
