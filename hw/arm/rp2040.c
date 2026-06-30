@@ -192,14 +192,14 @@ static void rp2040_update_nmi(RP2040State *s)
     int i;
 
     for (i = 0; i < RP2040_NUM_IRQS; i++) {
-        bool irq_level = s->irq_level[i];
+        bool irq_level = s->irq_level[0][i];
         bool route_to_nmi = nmi_mask & BIT(i);
 
-        qemu_set_irq(s->cpu_irq[i], irq_level && !route_to_nmi);
+        qemu_set_irq(s->cpu_irq[0][i], irq_level && !route_to_nmi);
         nmi_level |= irq_level && route_to_nmi;
     }
 
-    qemu_set_irq(s->nmi_irq, nmi_level);
+    qemu_set_irq(s->nmi_irq[0], nmi_level);
 }
 
 static void rp2040_syscfg_update(void *opaque)
@@ -215,7 +215,7 @@ static void rp2040_set_irq(void *opaque, int irq, int level)
     RP2040State *s = opaque;
 
     assert(irq >= 0 && irq < RP2040_NUM_IRQS);
-    s->irq_level[irq] = level;
+    s->irq_level[0][irq] = level;
     rp2040_update_nmi(s);
 }
 
@@ -294,11 +294,17 @@ static const MemoryRegionOps rp2040_usbctrl_regs_ops = {
 static void rp2040_soc_init(Object *obj)
 {
     RP2040State *s = RP2040(obj);
+    int i;
 
-    object_initialize_child(obj, "armv7m", &s->armv7m, TYPE_ARMV7M);
-    qdev_prop_set_string(DEVICE(&s->armv7m), "cpu-type",
-                         ARM_CPU_TYPE_NAME("cortex-m0"));
-    qdev_prop_set_uint32(DEVICE(&s->armv7m), "num-irq", 32);
+    for (i = 0; i < RP2040_NUM_CORES; i++) {
+        g_autofree char *name = g_strdup_printf("proc%d", i);
+
+        object_initialize_child(obj, name, &s->armv7m[i], TYPE_ARMV7M);
+        qdev_prop_set_string(DEVICE(&s->armv7m[i]), "cpu-type",
+                             ARM_CPU_TYPE_NAME("cortex-m0"));
+        qdev_prop_set_uint32(DEVICE(&s->armv7m[i]), "num-irq", 32);
+    }
+    qdev_prop_set_bit(DEVICE(&s->armv7m[1]), "start-powered-off", true);
 
     object_initialize_child(obj, "uart0", &s->uart0, TYPE_PL011);
     object_property_add_alias(obj, "serial0", OBJECT(&s->uart0), "chardev");
@@ -545,21 +551,32 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
                                     rp2040_unimplemented[i].size);
     }
 
-    qdev_connect_clock_in(DEVICE(&s->armv7m), "cpuclk", s->sysclk);
-    object_property_set_link(OBJECT(&s->armv7m), "memory",
-                             OBJECT(s->board_memory), &err);
-    if (err != NULL) {
-        error_propagate(errp, err);
-        return;
-    }
+    for (i = 0; i < RP2040_NUM_CORES; i++) {
+        int irq;
 
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp)) {
-        return;
+        qdev_connect_clock_in(DEVICE(&s->armv7m[i]), "cpuclk", s->sysclk);
+        g_autofree char *name = g_strdup_printf("rp2040.proc%d-memory", i);
+
+        memory_region_init_alias(&s->cpu_memory[i], OBJECT(dev), name,
+                                 s->board_memory, 0,
+                                 memory_region_size(s->board_memory));
+        object_property_set_link(OBJECT(&s->armv7m[i]), "memory",
+                                 OBJECT(&s->cpu_memory[i]), &err);
+        if (err != NULL) {
+            error_propagate(errp, err);
+            return;
+        }
+
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m[i]), errp)) {
+            return;
+        }
+        for (irq = 0; irq < RP2040_NUM_IRQS; irq++) {
+            s->cpu_irq[i][irq] = qdev_get_gpio_in(DEVICE(&s->armv7m[i]),
+                                                  irq);
+        }
+        s->nmi_irq[i] = qdev_get_gpio_in_named(DEVICE(&s->armv7m[i]),
+                                               "NMI", 0);
     }
-    for (i = 0; i < RP2040_NUM_IRQS; i++) {
-        s->cpu_irq[i] = qdev_get_gpio_in(DEVICE(&s->armv7m), i);
-    }
-    s->nmi_irq = qdev_get_gpio_in_named(DEVICE(&s->armv7m), "NMI", 0);
     rp2040_update_nmi(s);
 
     qdev_connect_clock_in(DEVICE(&s->uart0), "clk",

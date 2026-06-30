@@ -352,10 +352,10 @@ Current clock/reset bring-up note:
 - The SIO block now provides `CPUID`, user GPIO and QSPI `GPIO_HI`
   output/output-enable registers with set/clear/xor operations, 8-entry
   inter-core FIFOs, FIFO `VLD`/`RDY`/`ROE`/`WOF` status, proc0 FIFO IRQ
-  output, and simple hardware spinlock claim/release semantics. Core1 is not
-  instantiated yet, so the proc1 FIFO IRQ output is intentionally not routed.
-  The divider, interpolators, and SDK core1 launch protocol remain future
-  work.
+  output, and simple hardware spinlock claim/release semantics. Core1 is
+  instantiated and starts powered off; the proc1 FIFO IRQ output remains
+  intentionally unrouted until the SDK-compatible core1 wake path exists. The
+  divider, interpolators, and SDK core1 launch protocol remain future work.
 
 ## Phase 13: SIO Multicore Groundwork
 
@@ -375,18 +375,18 @@ Current multicore groundwork note:
 - SIO uses QEMU's `current_cpu` thread-local guest vCPU pointer to determine
   whether an MMIO access comes from proc0 or proc1. This is a QEMU guest CPU
   service, not the host machine CPU id.
-- The proc1 FIFO IRQ output is intentionally left unrouted until a second
-  ARMv7M instance exists.
+- The proc1 FIFO IRQ output is intentionally left unrouted until the proc1
+  wake/reset path exists.
 
 ## Phase 14: Instantiate Cortex-M0+ Proc1
 
-- [ ] Split the current single `ARMv7MState armv7m` into proc0/proc1 state
+- [x] Split the current single `ARMv7MState armv7m` into proc0/proc1 state
   while preserving proc0 behavior.
-- [ ] Keep proc1 held in reset or dormant after machine reset.
-- [ ] Wire proc1 to the shared RP2040 memory map and `clk_sys`.
-- [ ] Add separate IRQ and NMI routing for proc0 and proc1.
+- [x] Keep proc1 held in reset or dormant after machine reset.
+- [x] Wire proc1 to the shared RP2040 memory map and `clk_sys`.
+- [x] Add separate IRQ and NMI routing storage for proc0 and proc1.
 - [ ] Route `SIO_IRQ_PROC1` only to proc1.
-- [ ] Ensure proc0 boot, UART, flash, timer, watchdog, and boot ROM tests still
+- [x] Ensure proc0 boot, UART, flash, timer, watchdog, and boot ROM tests still
   pass unchanged.
 - [ ] Document that dual-core scheduling is functional, not cycle-accurate.
 

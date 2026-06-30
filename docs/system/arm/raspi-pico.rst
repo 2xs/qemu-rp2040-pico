@@ -25,7 +25,7 @@ stable.
 Supported devices
 -----------------
 
- * Cortex-M0+ CPU, core 0 only
+ * Two Cortex-M0+ cores, with core 1 currently instantiated but powered off
  * 16 KiB boot ROM window
  * 264 KiB SRAM
  * 2 MiB external flash contents mapped through the XIP window
@@ -118,9 +118,10 @@ registers with stable shallow behaviour.  ``TBMAN.PLATFORM`` reports the
 documented ASIC platform bit.  ``SIO`` implements the core ID, the user and
 QSPI GPIO output/output-enable registers, 8-entry inter-core FIFOs,
 ``VLD``/``RDY``/``ROE``/``WOF`` FIFO status, proc0 FIFO IRQ output, and
-hardware spinlock claim/release semantics.  Core1 is not instantiated yet, so
-the proc1 FIFO IRQ output is intentionally not routed.  The SIO divider,
-interpolator datapaths and SDK core1 launch protocol remain future work.
+hardware spinlock claim/release semantics.  Core1 is instantiated and starts
+powered off; the proc1 FIFO IRQ output is intentionally not routed until the
+core1 wake/reset path exists.  The SIO divider, interpolator datapaths and SDK
+core1 launch protocol remain future work.
 
 Clock and XOSC model
 --------------------
