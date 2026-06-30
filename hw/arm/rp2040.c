@@ -106,7 +106,6 @@ static const struct {
     hwaddr base;
     hwaddr size;
 } rp2040_unimplemented[] = {
-    { "rp2040.psm",      0x40010000, 0x4000 },
     { "rp2040.iobank0",  0x40014000, 0x4000 },
     { "rp2040.padsbank0", 0x4001c000, 0x4000 },
     { "rp2040.padsqspi", 0x40020000, 0x4000 },
@@ -208,6 +207,17 @@ static void rp2040_syscfg_update(void *opaque)
 
     rp2040_update_mempowerdown(s);
     rp2040_update_nmi(s);
+}
+
+static void rp2040_psm_update(void *opaque)
+{
+    RP2040State *s = opaque;
+
+    /*
+     * FRCE_OFF_PROC1 is recorded by the PSM model.  Starting and stopping the
+     * second ARMv7M instance is handled by the later core1 launch step.
+     */
+    (void)rp2040_psm_get_frce_off(&s->psm);
 }
 
 static void rp2040_set_irq(void *opaque, int irq, int level)
@@ -324,6 +334,7 @@ static void rp2040_soc_init(Object *obj)
     qdev_prop_set_uint32(DEVICE(&s->pll_usb), "base", RP2040_PLL_USB_BASE);
     qdev_prop_set_uint32(DEVICE(&s->pll_usb), "fallback-hz", 48000000);
 
+    object_initialize_child(obj, "psm", &s->psm, TYPE_RP2040_PSM);
     object_initialize_child(obj, "resets", &s->resets, TYPE_RP2040_RESETS);
     object_initialize_child(obj, "rosc", &s->rosc, TYPE_RP2040_ROSC);
     object_initialize_child(obj, "sio", &s->sio, TYPE_RP2040_SIO);
@@ -411,6 +422,12 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->pll_usb), 0, RP2040_PLL_USB_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->psm), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->psm), 0, RP2040_PSM_BASE);
+    rp2040_psm_set_update_callback(&s->psm, rp2040_psm_update, s);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->resets), errp)) {
         return;

@@ -392,7 +392,7 @@ Current multicore groundwork note:
 
 ## Phase 15: SDK-Compatible Core1 Launch
 
-- [ ] Model the reset/power path used by Pico SDK `multicore_reset_core1()`,
+- [x] Model the reset/power path used by Pico SDK `multicore_reset_core1()`,
   including the `PSM_FRCE_OFF_PROC1` behavior or an equivalent documented
   minimal shim.
 - [ ] Support the Pico SDK FIFO launch sequence `{0, 0, 1, VTOR, SP, PC}`.

@@ -110,6 +110,9 @@ config RP2040_IOQSPI
 config RP2040_PLL
     bool
 
+config RP2040_PSM
+    bool
+
 config RP2040_RESETS
     bool
 
