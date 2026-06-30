@@ -289,6 +289,8 @@ Current persistence note:
 - [x] Add RP2040 watchdog countdown, software trigger, reason, scratch, and
   tick-generator behavior.
 - [x] Add regression tests for watchdog behavior required by firmware boot.
+- [x] Add a minimal RP2040 TIMER model with a virtual-time microsecond
+  counter, four one-shot alarms, IRQ delivery, and a functional alarm test.
 
 Current clock/reset bring-up note:
 
@@ -342,6 +344,11 @@ Current clock/reset bring-up note:
   `TICK`, schedules a QEMU virtual-time timeout from `clk_ref / TICK.CYCLES`,
   applies the RP2040-E1 double-decrement behavior, and uses QEMU's watchdog
   action path for both timer expiry and `CTRL.TRIGGER`.
+- The TIMER block now exposes the 64-bit microsecond counter registers,
+  `ALARM0..3`, `ARMED`, `DBGPAUSE`, `PAUSE`, `INTR`, `INTE`, `INTF`, and
+  `INTS`. Alarm outputs are wired to RP2040 IRQs 0..3 and tested through
+  NVIC delivery. The counter uses QEMU virtual time rather than CPU-cycle
+  timing, and pause/debug side effects remain minimal.
 - The SIO block now provides `CPUID`, user GPIO and QSPI `GPIO_HI`
   output/output-enable registers with set/clear/xor operations, empty
   single-core FIFO status, and simple hardware spinlock claim/release

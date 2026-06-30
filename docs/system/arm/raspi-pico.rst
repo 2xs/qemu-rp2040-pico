@@ -349,3 +349,8 @@ Known limitations
    ``TICK``, including ``CTRL.TRIGGER`` and the RP2040-E1 double-decrement
    behaviour.  Debug pause inputs are stored but not connected to a debug
    fabric model.
+ * The TIMER block models the microsecond counter, ``ALARM0`` through
+   ``ALARM3``, ``ARMED``, ``DBGPAUSE``, ``PAUSE`` and the interrupt
+   registers.  Alarm outputs are connected to RP2040 IRQs 0 through 3.  The
+   counter advances on QEMU virtual time rather than CPU-cycle timing, and
+   debug pause inputs have no external debug-fabric side effects.
