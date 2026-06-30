@@ -117,7 +117,6 @@ static const struct {
     { "rp2040.i2c1",     0x40048000, 0x4000 },
     { "rp2040.adc",      0x4004c000, 0x4000 },
     { "rp2040.pwm",      0x40050000, 0x4000 },
-    { "rp2040.timer",    0x40054000, 0x4000 },
     { "rp2040.rtc",      0x4005c000, 0x4000 },
     { "rp2040.dma",      0x50000000, 0x1000 },
     { "rp2040.pio0",     0x50200000, 0x10000 },
@@ -324,6 +323,7 @@ static void rp2040_soc_init(Object *obj)
     object_initialize_child(obj, "syscfg", &s->syscfg, TYPE_RP2040_SYSCFG);
     object_initialize_child(obj, "sysinfo", &s->sysinfo, TYPE_RP2040_SYSINFO);
     object_initialize_child(obj, "tbman", &s->tbman, TYPE_RP2040_TBMAN);
+    object_initialize_child(obj, "timer", &s->timer, TYPE_RP2040_TIMER);
     object_initialize_child(obj, "vreg", &s->vreg, TYPE_RP2040_VREG);
     object_initialize_child(obj, "watchdog", &s->watchdog,
                             TYPE_RP2040_WATCHDOG);
@@ -435,6 +435,14 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->tbman), 0, RP2040_TBMAN_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->timer), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->timer), 0, RP2040_TIMER_BASE);
+    for (i = 0; i < 4; i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->timer), i, s->irq[i]);
+    }
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->vreg), errp)) {
         return;
