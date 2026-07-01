@@ -544,7 +544,7 @@ Current SDK compatibility note:
   execution are sufficient for the SDK `multicore_lockout` handshake.
 - [x] Add a no-SDK functional regression derived from the SDK smoke test once
   the required SIO/lockout behavior is understood.
-- [ ] After the atomic synthetic service passes, add a second test mode that
+- [x] After the atomic synthetic service passes, add a second test mode that
   exercises the existing flash busy/XIP HardFault policy during erase/program.
 - [ ] Try the same SDK image with `-bios pipico.rom` after the external mask
   ROM path can launch core1; use this to validate the SIO/FIFO behavior shared
@@ -566,6 +566,11 @@ Current SDK flash-safe note:
   reproduces the same core pieces without the SDK: synthetic ROM core1 launch,
   proc1 FIFO IRQ lockout, SIO spinlock claim/release, synthetic
   `flash_range_erase/program`, XIP verification, and helper counter checks.
+- The in-tree no-SDK regression
+  `test_flash_busy_multicore_lockout_hardfault` covers the lower-level
+  SSI/XIP path: core1 runs its FIFO lockout handler from SRAM, core0 starts a
+  page program through SSI, and an XIP read while flash is busy reaches the
+  SRAM HardFault handler.
 
 ## Phase 16: Documentation
 
