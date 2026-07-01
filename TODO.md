@@ -253,6 +253,9 @@ Current flash command model note:
 - [x] Document the chosen behavior.
 - [x] Implement the chosen behavior.
 - [x] Add a test for XIP access while busy if busy timing/state is modeled.
+- [x] Add a test for core0 instruction fetch from XIP while flash is busy.
+- [x] Add a test for core1 instruction fetch from XIP while core0 starts a
+  flash program operation.
 
 ## Phase 11: Flash Persistence
 
@@ -571,6 +574,11 @@ Current SDK flash-safe note:
   SSI/XIP path: core1 runs its FIFO lockout handler from SRAM, core0 starts a
   page program through SSI, and an XIP read while flash is busy reaches the
   SRAM HardFault handler.
+- The in-tree no-SDK regressions
+  `test_flash_busy_core0_xip_fetch_hardfault` and
+  `test_flash_busy_core1_xip_fetch_hardfault` now cover instruction fetch
+  faults from XIP while the flash model is busy on the current core and on the
+  other core.
 - The same local SDK image also passes with the RFC `pipico.rom` using
   `qemu-system-arm -machine raspi-pico,strict-uart-pins=off -bios pipico.rom
   -kernel .local/rp2040-sdk-tests/flash_safe_multicore/build/flash_safe_multicore.elf`;

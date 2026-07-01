@@ -717,6 +717,42 @@ class RaspiPicoMachine(QemuSystemTest):
         0x00, 0x10, 0x00, 0x10, 0x00, 0x40, 0x03, 0x40,
     ])
 
+    # Starts a page program from SRAM, leaves the flash busy, then branches
+    # back to XIP on core 0. The expected result is a core 0 HardFault handled
+    # by the SRAM vector table.
+    FLASH_BUSY_CORE0_XIP_FAULT_BIN = bytes.fromhex(
+        '002004200900001038483949394a914204d20b68036004310430f8e733480130'
+        '0047354800f044f8fee7c0462f483349016005a101314160002181601aa10131'
+        'c1602f4a1060c0462e4c002020602e4c2e4820602e4c012020602a4c206000f0'
+        '15f8022000f017f8002000f014f8202000f011f8002000f00ef85a2000f00bf8'
+        '234c0020206023480130004700b5062000f001f800bd204a1060204b18680028'
+        'fcd010687047c04605a000f001f8fee71b4a0178002902d011600130f9e77047'
+        '434f5245302058495020484152444641554c54204f4b0a00434f524530205849'
+        '50204e4f204641554c540a00000000202c00001024010010d800001000200420'
+        '08ed00e008000018000000180000070010000018220000106000001824000018'
+        '00400340'
+    )
+
+    # Launches core 1 into a small XIP loop through the synthetic ROM FIFO
+    # protocol. Core 0 then starts a page program from SRAM. The expected
+    # result is a core 1 HardFault handled by the shared SRAM vector table.
+    FLASH_BUSY_CORE1_XIP_FAULT_BIN = bytes.fromhex(
+        '002004200900001056485749574a914204d20b68036004310430f8e751480130'
+        '0047534800f001f8fee752490a6802231a42fbd0504908607047c04649484f49'
+        '016004a1013141600021816030a10131c160c046002000f017f8002000f014f8'
+        '012000f011f83f4800f00ef8444800f00bf8444800f008f800f017f83c498842'
+        '4ad100f01af8fee710b5044600f005f800f00bf8a0423fd110bd36490a680223'
+        '1a42fbd034490860704732490a6801231a42fbd034490868704700b5334c0020'
+        '2060334c33482060334c012020602f4c2060062000f013f8022000f010f80020'
+        '00f00df8302000f00af8002000f007f8a52000f004f8284c0020206000bd274a'
+        '1060274b18680028fcd010687047c04607a000f005f8fee70ba000f001f8fee7'
+        '204a0178002902d011600130f9e77047434f5245312058495020484152444641'
+        '554c54204f4b0a00434f5245312058495020484152444641554c54204641494c'
+        '0a00c046000000203c000010a801001001101ec0500000d0540000d000200420'
+        '0010042023000010580000d00800001800000018000007001000001860000018'
+        '2400001800400340'
+    )
+
     def test_uart0(self):
         self.set_direct_uart_machine()
 
@@ -1094,6 +1130,34 @@ class RaspiPicoMachine(QemuSystemTest):
         self.vm.launch()
 
         wait_for_console_pattern(self, 'HARDFAULT OK')
+
+    def test_flash_busy_core0_xip_fetch_hardfault(self):
+        self.set_direct_uart_machine()
+
+        image = self.scratch_file('flash-busy-core0-xip-fault.bin')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_bootable_image(
+                self.FLASH_BUSY_CORE0_XIP_FAULT_BIN))
+
+        self.vm.set_console()
+        self.vm.add_args('-kernel', image)
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'CORE0 XIP HARDFAULT OK')
+
+    def test_flash_busy_core1_xip_fetch_hardfault(self):
+        self.set_direct_uart_machine()
+
+        image = self.scratch_file('flash-busy-core1-xip-fault.bin')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_bootable_image(
+                self.FLASH_BUSY_CORE1_XIP_FAULT_BIN))
+
+        self.vm.set_console()
+        self.vm.add_args('-kernel', image)
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'CORE1 XIP HARDFAULT OK')
 
 
 if __name__ == '__main__':
