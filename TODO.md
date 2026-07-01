@@ -402,15 +402,29 @@ Current multicore groundwork note:
   point.
 - [x] Implement enough launch behavior for the SDK-style FIFO handshake to
   complete once core1 is already waiting in synthetic ROM.
+- [x] Validate a local Pico SDK multicore smoke test that uses
+  `multicore_launch_core1()` and confirms a proc1 FIFO acknowledgement.
 - [x] Add a bare-metal functional test where proc0 sends the SDK launch
   sequence, receives echoes from proc1 through SIO FIFO, and then receives a
   post-jump `0xd01e` acknowledgement from code running on proc1's supplied
   stack.
 - [x] Extend the synthetic ROM core1 path to jump to the provided `VTOR`,
   stack pointer and entry point after the sequence is validated.
-- [ ] Add a Pico SDK multicore hello-world test once the SDK fixture is stable.
+- [x] Add a Pico SDK-derived no-SDK functional test for the core1 launch
+  handshake and post-jump acknowledgement.
+- [x] Add a no-SDK ELF loader regression test for SDK-style empty SRAM
+  `PT_LOAD` segments.
+- [ ] Add synthetic ROM function-table helpers, or use the real mask ROM path,
+  for Pico SDK builds that rely on boot ROM bit/mem/float/double helpers.
 - [ ] Document remaining limitations: timing, lockout behavior, flash-write
   lockout interactions, divider/interpolator coverage, and reset fidelity.
+
+Current SDK compatibility note:
+
+- The local SDK smoke test is kept outside git under `.local/` and configured
+  to use compiler implementations for bit, memory, float and double helpers.
+  Default Pico SDK RP2040 builds may call the boot ROM function table; QEMU's
+  synthetic ROM does not expose that ABI yet.
 
 ## Phase 16: Documentation
 

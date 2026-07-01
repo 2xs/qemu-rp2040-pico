@@ -102,9 +102,10 @@ class RaspiPicoMachine(QemuSystemTest):
         0x6c, 0x00, 0x00, 0x10, 0x00, 0x40, 0x03, 0x40,
     ])
 
-    # Core 0 sends the Pico SDK FIFO launch sequence to synthetic ROM on core
-    # 1. Core 1 echoes the sequence, jumps to the supplied entry point, calls
-    # send_ack() using the supplied stack, and sends 0xd01e back through FIFO.
+    # Core 0 sends the Pico SDK multicore_launch_core1_raw() FIFO sequence to
+    # synthetic ROM on core 1. Core 1 echoes the sequence, jumps to the
+    # supplied entry point, calls send_ack() using the supplied stack, and
+    # sends 0xd01e back through FIFO.
     CORE1_WORKING_TEST_BIN = bytes([
         0x00, 0x20, 0x04, 0x20, 0x11, 0x00, 0x00, 0x10,
         0x55, 0x00, 0x00, 0x10, 0x55, 0x00, 0x00, 0x10,
@@ -159,8 +160,13 @@ class RaspiPicoMachine(QemuSystemTest):
 
     @staticmethod
     def make_xip_elf(payload):
+        return RaspiPicoMachine.make_xip_elf_with_phdrs(payload, ())
+
+    @staticmethod
+    def make_xip_elf_with_phdrs(payload, extra_phdrs):
         load_addr = 0x10000000
         payload_off = 0x100
+        phnum = 1 + len(extra_phdrs)
 
         elf_header = struct.pack(
             '<16sHHIIIIIHHHHHH',
@@ -174,7 +180,7 @@ class RaspiPicoMachine(QemuSystemTest):
             0x05000200, # EABI version 5, soft-float
             52,         # e_ehsize
             32,         # e_phentsize
-            1,          # e_phnum
+            phnum,
             0,
             0,
             0,
@@ -191,7 +197,24 @@ class RaspiPicoMachine(QemuSystemTest):
             4,
         )
 
-        return elf_header + phdr + bytes(payload_off - 84) + payload
+        phdrs = phdr + b''.join(extra_phdrs)
+        padding = bytes(payload_off - 52 - len(phdrs))
+        return elf_header + phdrs + padding + payload
+
+    @classmethod
+    def make_xip_elf_with_empty_sram_load(cls, payload):
+        sram_phdr = struct.pack(
+            '<IIIIIIII',
+            1,          # PT_LOAD
+            0,          # p_offset is ignored when p_filesz is zero
+            0x20000000,
+            0x20000000,
+            0,
+            0x1000,
+            6,          # PF_R | PF_W
+            4,
+        )
+        return cls.make_xip_elf_with_phdrs(payload, (sram_phdr,))
 
     @classmethod
     def make_uf2(cls, payload, target=0x10000000):
@@ -422,6 +445,20 @@ class RaspiPicoMachine(QemuSystemTest):
         image = self.scratch_file('uart-test.elf')
         with open(image, 'wb') as image_file:
             image_file.write(self.make_bootable_uart_elf())
+
+        self.vm.set_console()
+        self.vm.add_args('-kernel', image)
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'PICO UART OK')
+
+    def test_uart0_elf_with_empty_sram_load_segment(self):
+        self.set_machine('raspi-pico')
+
+        image = self.scratch_file('uart-test-empty-sram.elf')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_xip_elf_with_empty_sram_load(
+                self.make_bootable_image(self.UART_TEST_BIN)))
 
         self.vm.set_console()
         self.vm.add_args('-kernel', image)

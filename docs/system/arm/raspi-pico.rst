@@ -132,6 +132,14 @@ touched by the Pico SDK core1 reset path; ``FRCE_OFF_PROC1`` is stored,
 reflected in ``DONE``, and used to hold or release proc1.  The SIO divider and
 interpolator datapaths remain future work.
 
+A local Pico SDK smoke test using ``multicore_launch_core1()`` has been used
+to validate this synthetic ROM core1 launch path.  That SDK build is configured
+to use compiler implementations for bit, memory, float and double helpers,
+because the synthetic ROM does not yet expose the RP2040 boot ROM function
+table ABI.  The in-tree functional tests keep the resulting coverage
+self-contained by reproducing the SDK FIFO launch sequence without depending
+on the SDK.
+
 Clock and XOSC model
 --------------------
 
@@ -361,7 +369,10 @@ Known limitations
    does not model analog frequency variation or true entropy from
    ``RANDOMBIT``.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
-   RP2040 mask ROM execution model.
+   RP2040 mask ROM execution model.  The synthetic ROM supports the direct
+   boot2/application launch path and the core1 FIFO launch sequence, but not
+   the RP2040 boot ROM function table used by default SDK bit/mem/float/double
+   helper implementations.
  * USB, PIO, DMA and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.
