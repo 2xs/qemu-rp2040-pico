@@ -451,6 +451,30 @@ Current SDK compatibility note:
 - [ ] Convert shallow RP2040 peripheral models to use the shared NYI helper for
   unimplemented-but-visible register behavior.
 
+## Phase 15b: Minimal RP2040 DMA
+
+- [x] Add a dedicated RP2040 DMA sysbus device at `0x50000000`.
+- [x] Model the 12 RP2040 DMA channels with `READ_ADDR`, `WRITE_ADDR`,
+  `TRANS_COUNT`, `CTRL_TRIG`, and SDK-used alias trigger registers.
+- [x] Implement immediate memory-to-memory transfers for 8-, 16-, and 32-bit
+  transfer sizes.
+- [x] Support `INCR_READ`/`INCR_WRITE`, including the RP2040 fill pattern used
+  for memset-like transfers: fixed read address plus incrementing write
+  address.
+- [x] Implement `DREQ_FORCE` as an immediate transfer trigger.
+- [x] Treat non-`DREQ_FORCE` paced transfers as immediately ready and log the
+  limitation through the shared RP2040 NYI helper.
+- [x] Expose `INTR`, `INTE0/1`, `INTF0/1`, `INTS0/1`, and wire DMA IRQ0/IRQ1
+  to RP2040 IRQ lines 11/12.
+- [x] Keep synthetic ROM `memcpy`/`memset` as CPU-loop helpers for now, rather
+  than making them depend on guest-visible DMA channel state.
+- [x] Add a no-SDK functional test that validates DMA copy, DMA fill, interrupt
+  status, and interrupt clear behavior.
+- [ ] Add SDK-derived DMA tests once the boot ROM table supports enough SDK
+  default helper/data lookups.
+- [ ] Implement or document remaining DMA features: paced DREQ timing, ring
+  wrapping, sniff checksum, abort latency, and error reporting fidelity.
+
 ## Phase 16: Documentation
 
 - [x] Add user documentation for the `raspi-pico` machine.
@@ -483,7 +507,7 @@ Current SDK compatibility note:
 - [ ] Support a more faithful boot ROM flow.
 - [ ] Expand Pico SDK compatibility.
 - [ ] Add PIO.
-- [ ] Add DMA.
+- [x] Add minimal DMA.
 - [ ] Add USB.
 - [ ] Add broader peripheral coverage: SPI, I2C, PWM, ADC.
 
