@@ -440,9 +440,9 @@ Current SDK compatibility note:
   used by Pico SDK headers.
 - [x] Route every function-table entry to an explicit NYI stub that logs the
   boot ROM function name and then faults, instead of failing silently.
-- [ ] Replace the `memcpy`, `memset`, `clz32`, `ctz32`, `popcount32`, and
+- [x] Replace the `memcpy`, `memset`, `clz32`, `ctz32`, `popcount32`, and
   `reverse32` NYI stubs with real synthetic ROM implementations.
-- [ ] Add no-SDK tests for each implemented bit/memory boot ROM helper.
+- [x] Add no-SDK tests for each implemented bit/memory boot ROM helper.
 - [ ] Re-run Pico SDK smoke tests without forcing compiler bit/mem helper
   implementations.
 - [ ] Implement or deliberately document the flash-related boot ROM helper
