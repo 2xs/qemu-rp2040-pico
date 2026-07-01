@@ -22,6 +22,8 @@
 
 #define RP2040_UART0_BASE 0x40034000
 #define RP2040_UART0_IRQ  20
+#define RP2040_DMA_IRQ_0  11
+#define RP2040_DMA_IRQ_1  12
 #define RP2040_SIO_IRQ_PROC0 15
 #define RP2040_SIO_IRQ_PROC1 16
 #define RP2040_PROC1       1
@@ -186,7 +188,6 @@ static const struct {
     { "rp2040.adc",      0x4004c000, 0x4000 },
     { "rp2040.pwm",      0x40050000, 0x4000 },
     { "rp2040.rtc",      0x4005c000, 0x4000 },
-    { "rp2040.dma",      0x50000000, 0x1000 },
     { "rp2040.pio0",     0x50200000, 0x10000 },
     { "rp2040.pio1",     0x50300000, 0x10000 },
 };
@@ -683,6 +684,7 @@ static void rp2040_soc_init(Object *obj)
 
     object_initialize_child(obj, "xip", &s->xip, TYPE_RP2040_XIP);
     object_initialize_child(obj, "clocks", &s->clocks, TYPE_RP2040_CLOCKS);
+    object_initialize_child(obj, "dma", &s->dma, TYPE_RP2040_DMA);
     object_initialize_child(obj, "ioqspi", &s->ioqspi, TYPE_RP2040_IOQSPI);
     object_initialize_child(obj, "pll-sys", &s->pll_sys, TYPE_RP2040_PLL);
     qdev_prop_set_string(DEVICE(&s->pll_sys), "trace-name",
@@ -777,6 +779,19 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->clocks), 0, RP2040_CLOCKS_BASE);
     clock_set_source(s->sysclk, qdev_get_clock_out(DEVICE(&s->clocks),
                                                    "clk-sys"));
+
+    object_property_set_link(OBJECT(&s->dma), "memory",
+                             OBJECT(s->board_memory), &err);
+    if (err != NULL) {
+        error_propagate(errp, err);
+        return;
+    }
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->dma), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->dma), 0, RP2040_DMA_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 0, s->irq[RP2040_DMA_IRQ_0]);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 1, s->irq[RP2040_DMA_IRQ_1]);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ioqspi), errp)) {
         return;
