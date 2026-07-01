@@ -720,10 +720,14 @@ static bool rp2040_xip_load_elf(RP2040XipState *s, const char *filename,
             continue;
         }
 
+        if (filesz == 0) {
+            continue;
+        }
+
         if (paddr < RP2040_XIP_FLASH_BASE ||
             paddr - RP2040_XIP_FLASH_BASE > s->flash_size ||
             filesz > memsz ||
-            memsz > s->flash_size - (paddr - RP2040_XIP_FLASH_BASE) ||
+            filesz > s->flash_size - (paddr - RP2040_XIP_FLASH_BASE) ||
             off > len ||
             filesz > len - off) {
             error_setg(errp, "flash ELF segment is outside XIP storage");
@@ -732,9 +736,6 @@ static bool rp2040_xip_load_elf(RP2040XipState *s, const char *filename,
 
         xip_off = paddr - RP2040_XIP_FLASH_BASE;
         memcpy(s->storage + xip_off, contents + off, filesz);
-        if (memsz > filesz) {
-            memset(s->storage + xip_off + filesz, 0, memsz - filesz);
-        }
     }
 
     return true;
