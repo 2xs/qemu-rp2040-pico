@@ -430,7 +430,7 @@ Current multicore groundwork note:
   handshake and post-jump acknowledgement.
 - [x] Add a no-SDK ELF loader regression test for SDK-style empty SRAM
   `PT_LOAD` segments.
-- [ ] Add synthetic ROM function-table helpers, or use the real mask ROM path,
+- [x] Add synthetic ROM function-table helpers, or use the real mask ROM path,
   for Pico SDK builds that rely on boot ROM bit/mem/float/double helpers.
 - [ ] Document remaining limitations: timing, lockout behavior, flash-write
   lockout interactions, divider/interpolator coverage, and reset fidelity.
@@ -477,8 +477,10 @@ Current SDK compatibility note:
   for their unmodeled SSI/QSPI side effects; `flash_range_erase` and
   `flash_range_program` delegate to the QEMU XIP flash model and preserve raw
   flash-file writeback.
-- [ ] Implement or document remaining `SF`/`SD` table helpers such as
-  comparisons, fixed-point conversions, and transcendental functions.
+- [x] Implement remaining synthetic `SF`/`SD` table helpers for comparisons,
+  fixed-point conversions, and transcendental functions. The synthetic ROM
+  still delegates the actual work to QEMU-side helpers rather than reproducing
+  the RP2040 mask ROM algorithms instruction-for-instruction.
 - [ ] Convert shallow RP2040 peripheral models to use the shared NYI helper for
   unimplemented-but-visible register behavior.
 
