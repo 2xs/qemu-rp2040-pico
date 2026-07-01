@@ -473,8 +473,10 @@ Current SDK compatibility note:
   than making them depend on guest-visible DMA channel state.
 - [x] Add a no-SDK functional test that validates DMA copy, DMA fill, interrupt
   status, and interrupt clear behavior.
-- [ ] Add SDK-derived DMA tests once the boot ROM table supports enough SDK
-  default helper/data lookups.
+- [x] Add an SDK-derived DMA smoke test under `.local/rp2040-sdk-tests` once
+  the boot ROM table supports enough SDK default helper/data lookups. The test
+  validates SDK `hardware_dma` copy and fill transfers against the QEMU DMA
+  model and remains outside Git.
 - [ ] Implement or document remaining DMA features: paced DREQ timing, ring
   wrapping, sniff checksum, abort latency, and error reporting fidelity.
 
