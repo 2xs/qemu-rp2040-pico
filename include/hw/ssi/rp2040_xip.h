@@ -40,6 +40,7 @@ struct RP2040XipState {
     uint32_t txftlr;
     uint32_t rxftlr;
     uint32_t imr;
+    uint32_t rx_sample_dly;
     uint32_t spi_ctrlr0;
 
     bool write_enable;

@@ -35,6 +35,11 @@
 #define RP2040_SSI_IMR        0x2c
 #define RP2040_SSI_ISR        0x30
 #define RP2040_SSI_RISR       0x34
+#define RP2040_SSI_TXOICR     0x38
+#define RP2040_SSI_RXOICR     0x3c
+#define RP2040_SSI_RXUICR     0x40
+#define RP2040_SSI_MSTICR     0x44
+#define RP2040_SSI_ICR        0x48
 #define RP2040_SSI_DMACR      0x4c
 #define RP2040_SSI_DMATDLR    0x50
 #define RP2040_SSI_DMARDLR    0x54
@@ -42,6 +47,7 @@
 #define RP2040_SSI_VERSION_ID 0x5c
 #define RP2040_SSI_DR0        0x60
 #define RP2040_SSI_DR_END     0xec
+#define RP2040_SSI_RX_SAMPLE_DLY 0xf0
 #define RP2040_SSI_SPI_CTRLR0 0xf4
 
 #define RP2040_SSI_SR_BUSY 0x01
@@ -51,10 +57,13 @@
 #define RP2040_SSI_SR_RFF  0x10
 
 #define FLASH_CMD_READ         0x03
+#define FLASH_CMD_WRITE_STATUS 0x01
 #define FLASH_CMD_PAGE_PROGRAM 0x02
 #define FLASH_CMD_READ_STATUS  0x05
+#define FLASH_CMD_READ_STATUS2 0x35
 #define FLASH_CMD_WRITE_ENABLE 0x06
 #define FLASH_CMD_SECTOR_ERASE 0x20
+#define FLASH_CMD_QUAD_IO_READ 0xeb
 
 #define FLASH_STATUS_WIP 0x01
 #define FLASH_STATUS_WEL 0x02
@@ -133,6 +142,11 @@ static uint8_t rp2040_xip_status(RP2040XipState *s)
 }
 
 static uint32_t rp2040_xip_tx_addr(RP2040XipState *s)
+{
+    return (uint32_t)s->tx[1] << 16 | s->tx[2] << 8 | s->tx[3];
+}
+
+static uint32_t rp2040_xip_quad_io_addr(RP2040XipState *s)
 {
     return (uint32_t)s->tx[1] << 16 | s->tx[2] << 8 | s->tx[3];
 }
@@ -317,6 +331,9 @@ static void rp2040_xip_finish_command(RP2040XipState *s)
     }
 
     switch (s->tx[0]) {
+    case FLASH_CMD_WRITE_STATUS:
+        s->write_enable = false;
+        break;
     case FLASH_CMD_PAGE_PROGRAM:
         rp2040_xip_program(s);
         break;
@@ -339,12 +356,25 @@ static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
     }
 
     switch (s->tx[0]) {
+    case FLASH_CMD_WRITE_STATUS:
+        s->write_enable = false;
+        rp2040_xip_rx_push(s, 0);
+        break;
+    case FLASH_CMD_PAGE_PROGRAM:
+    case FLASH_CMD_SECTOR_ERASE:
+        rp2040_xip_rx_push(s, 0);
+        break;
     case FLASH_CMD_WRITE_ENABLE:
         s->write_enable = true;
         rp2040_xip_reset_tx(s);
         break;
     case FLASH_CMD_READ_STATUS:
         rp2040_xip_rx_push(s, rp2040_xip_status(s));
+        rp2040_xip_finish_busy(s);
+        rp2040_xip_reset_tx(s);
+        break;
+    case FLASH_CMD_READ_STATUS2:
+        rp2040_xip_rx_push(s, 0);
         rp2040_xip_finish_busy(s);
         rp2040_xip_reset_tx(s);
         break;
@@ -356,6 +386,23 @@ static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
             rp2040_xip_rx_push(s, addr < s->flash_size ?
                                s->storage[addr] : 0xff);
         }
+        break;
+    case FLASH_CMD_QUAD_IO_READ:
+        /*
+         * Minimal 0xeb fast-read support for the RP2040 mask ROM path.
+         * The ROM clocks opcode, 24-bit address and mode/dummy bytes before
+         * consuming data. We do not model bus width or wait-cycle timing here.
+         */
+        if (s->tx_len <= 5) {
+            rp2040_xip_rx_push(s, 0);
+        } else {
+            addr = rp2040_xip_quad_io_addr(s) + s->tx_len - 6;
+            rp2040_xip_rx_push(s, addr < s->flash_size ?
+                               s->storage[addr] : 0xff);
+        }
+        break;
+    case 0x00:
+        rp2040_xip_rx_push(s, 0);
         break;
     default:
         /*
@@ -456,6 +503,8 @@ static void rp2040_xip_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
         s->xip_ctrl = new_value & (RP2040_XIP_CTRL_EN |
                                    RP2040_XIP_CTRL_ERR_BADWRITE);
         break;
+    case 0x04:
+        break;
     case 0x0c:
     case 0x10:
         break;
@@ -533,6 +582,13 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
     case RP2040_SSI_RISR:
         ret = risr;
         break;
+    case RP2040_SSI_TXOICR:
+    case RP2040_SSI_RXOICR:
+    case RP2040_SSI_RXUICR:
+    case RP2040_SSI_MSTICR:
+    case RP2040_SSI_ICR:
+        ret = 0;
+        break;
     case RP2040_SSI_DMACR:
     case RP2040_SSI_DMATDLR:
         ret = 0;
@@ -545,6 +601,9 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
         break;
     case RP2040_SSI_VERSION_ID:
         ret = 0x3430312a;
+        break;
+    case RP2040_SSI_RX_SAMPLE_DLY:
+        ret = s->rx_sample_dly;
         break;
     case RP2040_SSI_SPI_CTRLR0:
         ret = s->spi_ctrlr0;
@@ -614,6 +673,10 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
     case RP2040_SSI_IMR:
         new_value = rp2040_xip_apply_alias(s->imr, value, alias);
         s->imr = new_value & 0x3f;
+        break;
+    case RP2040_SSI_RX_SAMPLE_DLY:
+        s->rx_sample_dly = rp2040_xip_apply_alias(s->rx_sample_dly, value,
+                                                  alias) & 0xff;
         break;
     case RP2040_SSI_SPI_CTRLR0:
         s->spi_ctrlr0 = rp2040_xip_apply_alias(s->spi_ctrlr0, value, alias);
@@ -985,6 +1048,7 @@ static void rp2040_xip_reset(DeviceState *dev)
     s->txftlr = 0;
     s->rxftlr = 0;
     s->imr = 0;
+    s->rx_sample_dly = 0;
     s->spi_ctrlr0 = 0;
     s->write_enable = false;
     s->busy = false;
