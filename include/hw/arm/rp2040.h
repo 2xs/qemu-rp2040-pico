@@ -17,6 +17,7 @@
 #include "hw/dma/rp2040_dma.h"
 #include "hw/misc/rp2040_clocks.h"
 #include "hw/misc/rp2040_ioqspi.h"
+#include "hw/misc/rp2040_pads.h"
 #include "hw/misc/rp2040_pll.h"
 #include "hw/misc/rp2040_psm.h"
 #include "hw/misc/rp2040_resets.h"
@@ -61,6 +62,8 @@ struct RP2040State {
     RP2040ClocksState clocks;
     RP2040DmaState dma;
     RP2040IoQspiState ioqspi;
+    RP2040PadsBank0State pads_bank0;
+    RP2040PadsQspiState pads_qspi;
     RP2040PllState pll_sys;
     RP2040PllState pll_usb;
     RP2040PsmState psm;

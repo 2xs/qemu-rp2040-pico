@@ -381,6 +381,7 @@ config RP2040
     select RP2040_DMA
     select RP2040_IOQSPI
     select RP2040_NYI
+    select RP2040_PADS
     select RP2040_PLL
     select RP2040_PSM
     select RP2040_RESETS
