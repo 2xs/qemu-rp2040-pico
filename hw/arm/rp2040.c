@@ -220,8 +220,6 @@ static const struct {
     hwaddr size;
 } rp2040_unimplemented[] = {
     { "rp2040.iobank0",  0x40014000, 0x4000 },
-    { "rp2040.padsbank0", 0x4001c000, 0x4000 },
-    { "rp2040.padsqspi", 0x40020000, 0x4000 },
     { "rp2040.busctrl",  0x40030000, 0x4000 },
     { "rp2040.uart1",    0x40038000, 0x4000 },
     { "rp2040.spi0",     0x4003c000, 0x4000 },
@@ -1182,6 +1180,10 @@ static void rp2040_soc_init(Object *obj)
     object_initialize_child(obj, "clocks", &s->clocks, TYPE_RP2040_CLOCKS);
     object_initialize_child(obj, "dma", &s->dma, TYPE_RP2040_DMA);
     object_initialize_child(obj, "ioqspi", &s->ioqspi, TYPE_RP2040_IOQSPI);
+    object_initialize_child(obj, "pads-bank0", &s->pads_bank0,
+                            TYPE_RP2040_PADS_BANK0);
+    object_initialize_child(obj, "pads-qspi", &s->pads_qspi,
+                            TYPE_RP2040_PADS_QSPI);
     object_initialize_child(obj, "pll-sys", &s->pll_sys, TYPE_RP2040_PLL);
     qdev_prop_set_string(DEVICE(&s->pll_sys), "trace-name",
                          "rp2040.pll_sys");
@@ -1293,6 +1295,18 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->ioqspi), 0, RP2040_IOQSPI_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pads_bank0), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pads_bank0), 0,
+                    RP2040_PADS_BANK0_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pads_qspi), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pads_qspi), 0,
+                    RP2040_PADS_QSPI_BASE);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->pll_sys), errp)) {
         return;

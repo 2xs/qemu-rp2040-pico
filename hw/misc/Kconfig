@@ -110,6 +110,9 @@ config RP2040_IOQSPI
 config RP2040_NYI
     bool
 
+config RP2040_PADS
+    bool
+
 config RP2040_PLL
     bool
 

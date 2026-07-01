@@ -336,6 +336,12 @@ RP2040 UART programmer's model: ``UARTDR`` is at offset ``0x000``,
 ``UARTRSR/UARTECR`` at ``0x004`` and ``UARTFR`` at ``0x018``.  See datasheet
 pages 429 to 431.
 
+The console path is currently connected directly to QEMU's serial backend.
+The RP2040 ``IO_BANK0`` GPIO function mux is not yet modeled, so programming
+GPIO0/GPIO1 ``FUNCSEL`` is not required to make UART0 visible to the host.
+``PADS_BANK0`` stores the documented pad-control registers separately from
+this UART path.
+
 For the initial console use case, the documented stable status behaviour is:
 
  * ``UARTFR.TXFE`` and ``UARTFR.RXFE`` follow QEMU PL011 FIFO state.
@@ -359,7 +365,11 @@ Known limitations
    and branches to the provided entry point.  When an external mask ROM is
    supplied, core 1 is kept powered off until that ROM path is modeled.
  * UART0 currently uses QEMU's PL011 model directly, with the RP2040
-   compatibility policy documented above.
+   compatibility policy documented above.  The GPIO function mux that routes
+   pins to UART0 is not yet modeled.
+ * ``PADS_BANK0`` and ``PADS_QSPI`` store documented pad-control registers and
+   implement RP2040 atomic aliases.  They do not model electrical pad
+   behaviour and do not currently gate UART or XIP operation.
  * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
    XIP control and SSI APB register blocks do handle the RP2040 atomic
    ``XOR``/``SET``/``CLR`` aliases.
