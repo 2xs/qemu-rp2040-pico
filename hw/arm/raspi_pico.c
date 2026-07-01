@@ -28,6 +28,7 @@ struct RaspiPicoMachineState {
 
     RP2040State soc;
     char *flash_file;
+    bool strict_uart_pins;
 };
 
 static char *raspi_pico_get_flash_file(Object *obj, Error **errp)
@@ -53,6 +54,8 @@ static void raspi_pico_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "soc", &s->soc, TYPE_RP2040);
     qdev_prop_set_chr(DEVICE(&s->soc), "serial0", serial_hd(0));
+    qdev_prop_set_bit(DEVICE(&s->soc), "strict-uart-pins",
+                      s->strict_uart_pins);
     /*
      * BOOTSEL is not pressed by default on a Pico board, so the mask ROM sees
      * the QSPI SS input deasserted and tries to boot from external flash.
@@ -91,6 +94,28 @@ static void raspi_pico_machine_finalize(Object *obj)
     g_free(s->flash_file);
 }
 
+static bool raspi_pico_get_strict_uart_pins(Object *obj, Error **errp)
+{
+    RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
+
+    return s->strict_uart_pins;
+}
+
+static void raspi_pico_set_strict_uart_pins(Object *obj, bool value,
+                                            Error **errp)
+{
+    RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
+
+    s->strict_uart_pins = value;
+}
+
+static void raspi_pico_machine_initfn(Object *obj)
+{
+    RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
+
+    s->strict_uart_pins = true;
+}
+
 static void raspi_pico_machine_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -110,12 +135,20 @@ static void raspi_pico_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "flash-file",
                                           "Load initial XIP flash contents "
                                           "from a raw host file");
+    object_class_property_add_bool(oc, "strict-uart-pins",
+                                   raspi_pico_get_strict_uart_pins,
+                                   raspi_pico_set_strict_uart_pins);
+    object_class_property_set_description(oc, "strict-uart-pins",
+                                          "Require GPIO0/GPIO1 IO_BANK0 "
+                                          "FUNCSEL=UART before UART0 reaches "
+                                          "the host serial backend");
 }
 
 static const TypeInfo raspi_pico_machine_info = {
     .name = TYPE_RASPI_PICO_MACHINE,
     .parent = TYPE_MACHINE,
     .instance_size = sizeof(RaspiPicoMachineState),
+    .instance_init = raspi_pico_machine_initfn,
     .class_init = raspi_pico_machine_class_init,
     .instance_finalize = raspi_pico_machine_finalize,
     .interfaces = arm_machine_interfaces,

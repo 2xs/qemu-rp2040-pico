@@ -317,6 +317,12 @@ Current clock/reset bring-up note:
 - `IO_QSPI` now stores QSPI pin `CTRL` and interrupt registers, returns stable
   zero pin `STATUS` values, and implements RP2040 atomic aliases. It is an
   IO-control model only, not a serial flash bus or pad-electrical model.
+- `IO_BANK0` now stores GPIO `CTRL` function-select/override registers and
+  per-core/dormant interrupt enable/force state, returns stable zero pin
+  `STATUS` values, and implements RP2040 atomic aliases. It gates UART0 host
+  serial I/O through the Pico console pins GPIO0/GPIO1 when
+  `strict-uart-pins` is enabled; other SIO/peripheral routing and real GPIO
+  edge events remain future work.
 - The PLL model is intentionally shallow: it stores `CS`, `PWR`,
   `FBDIV_INT`, and `PRIM`, applies the RP2040 atomic aliases, reports
   `CS.LOCK` immediately when the PLL is powered, and publishes a calculated
@@ -405,7 +411,8 @@ Current multicore groundwork note:
 - [x] Route `SIO_IRQ_PROC1` only to proc1.
 - [x] Ensure proc0 boot, UART, flash, timer, watchdog, and boot ROM tests still
   pass unchanged.
-- [ ] Document that dual-core scheduling is functional, not cycle-accurate.
+- [ ] Document remaining proc1 limitations: external mask-ROM core1 path,
+  peripheral IRQ routing beyond SIO/IO_BANK0, and missing lockout support.
 
 ## Phase 15: SDK-Compatible Core1 Launch
 
@@ -432,8 +439,9 @@ Current multicore groundwork note:
   `PT_LOAD` segments.
 - [x] Add synthetic ROM function-table helpers, or use the real mask ROM path,
   for Pico SDK builds that rely on boot ROM bit/mem/float/double helpers.
-- [ ] Document remaining limitations: timing, lockout behavior, flash-write
-  lockout interactions, divider/interpolator coverage, and reset fidelity.
+- [ ] Document remaining SDK-behavior limitations: missing lockout support,
+  flash busy/XIP interactions, SIO interpolator coverage, paced DMA behaviour,
+  and reset fidelity.
 
 Current SDK compatibility note:
 
@@ -509,6 +517,51 @@ Current SDK compatibility note:
   model and remains outside Git.
 - [ ] Implement or document remaining DMA features: paced DREQ timing, ring
   wrapping, sniff checksum, abort latency, and error reporting fidelity.
+
+## Phase 15c: SDK Flash Safe Execute and Multicore Lockout
+
+- [x] Document the intended separation of responsibilities:
+  hardware SIO provides FIFO IRQs and spinlocks; the Pico SDK implements
+  `multicore_lockout`; the boot ROM provides low-level flash helper routines.
+- [x] Add a QEMU-visible counter/trace path for synthetic boot ROM flash
+  helpers: `connect_internal_flash`, `flash_exit_xip`, `flash_flush_cache`,
+  `flash_enter_cmd_xip`, `flash_range_erase`, and `flash_range_program`.
+- [x] Add a first "atomic synthetic flash service" mode for the synthetic ROM
+  helpers: erase/program update the QEMU flash backing immediately and do not
+  expose a flash-busy interval to the guest cores.
+- [x] Use the atomic synthetic flash service to validate the SDK multicore
+  lockout protocol without conflating it with XIP busy/fault behavior.
+- [x] Build a local Pico SDK smoke test under `.local/rp2040-sdk-tests` that:
+  launches core1, calls `flash_safe_execute_core_init()` on core1 so the SDK
+  installs its multicore lockout victim handler, runs `flash_safe_execute()`
+  on core0, erases/programs one flash page, verifies the content, and prints a
+  UART result.
+- [x] Run that SDK smoke test with the synthetic ROM and
+  `strict-uart-pins=off` initially if the test still uses raw UART output.
+- [x] Confirm from QEMU-side helper counters/traces that the SDK reached the
+  synthetic flash helper path during the multicore lockout test.
+- [x] Validate that SIO FIFO IRQ delivery, spinlocks, `SEV/WFE`, and proc1
+  execution are sufficient for the SDK `multicore_lockout` handshake.
+- [ ] Add a no-SDK functional regression derived from the SDK smoke test once
+  the required SIO/lockout behavior is understood.
+- [ ] After the atomic synthetic service passes, add a second test mode that
+  exercises the existing flash busy/XIP HardFault policy during erase/program.
+- [ ] Try the same SDK image with `-bios pipico.rom` after the external mask
+  ROM path can launch core1; use this to validate the SIO/FIFO behavior shared
+  by the SDK and the real ROM path.
+- [ ] Decide whether synthetic ROM flash helpers should stay atomic for fast
+  compatibility tests, or whether they should optionally delegate to the more
+  detailed XIP/SSI busy model by default.
+
+Current SDK flash-safe note:
+
+- A local, untracked Pico SDK smoke test now lives in
+  `.local/rp2040-sdk-tests/flash_safe_multicore`. It uses
+  `flash_safe_execute_core_init()` on core1, `flash_safe_execute()` on core0,
+  and the SDK flash helpers to erase/program one page. Under QEMU synthetic
+  ROM it prints `SDK FLASH SAFE OK` and emits synthetic helper traces for
+  `connect_internal_flash`, `flash_exit_xip`, `flash_range_erase`,
+  `flash_flush_cache`, and `flash_range_program`.
 
 ## Phase 16: Documentation
 
