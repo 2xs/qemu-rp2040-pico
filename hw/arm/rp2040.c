@@ -35,8 +35,16 @@
 #define RP2040_BOOTROM_STUBS_OFFSET 0x0120
 #define RP2040_BOOTROM_FUNC_TABLE_OFFSET 0x0300
 #define RP2040_BOOTROM_DATA_TABLE_OFFSET 0x0340
+#define RP2040_BOOTROM_FLOAT_NYI_STUB_OFFSET 0x0360
+#define RP2040_BOOTROM_DOUBLE_NYI_STUB_OFFSET 0x0380
+#define RP2040_BOOTROM_FLOAT_TABLE_OFFSET 0x03c0
+#define RP2040_BOOTROM_DOUBLE_TABLE_OFFSET 0x0460
 #define RP2040_BOOTROM_FUNC_TABLE_ENTRY_SIZE 4
+#define RP2040_BOOTROM_DATA_TABLE_ENTRY_SIZE 4
 #define RP2040_BOOTROM_NYI_CODE_LITERAL_OFFSET 20
+#define RP2040_BOOTROM_ROM_VERSION_OFFSET 0x13
+#define RP2040_BOOTROM_SYNTHETIC_ROM_VERSION 2
+#define RP2040_BOOTROM_FLOAT_TABLE_WORDS 32
 
 #define USBCTRL_ADDR_ENDP       0x00
 #define USBCTRL_SIE_CTRL        0x4c
@@ -199,6 +207,11 @@ typedef struct RP2040BootromFunction {
     size_t impl_size;
 } RP2040BootromFunction;
 
+typedef struct RP2040BootromData {
+    uint16_t code;
+    uint16_t offset;
+} RP2040BootromData;
+
 #define RP2040_ROM_TABLE_CODE(c1, c2) ((uint16_t)(c1) | ((uint16_t)(c2) << 8))
 
 static const uint8_t rp2040_bootrom_clz32[] = {
@@ -288,6 +301,11 @@ static const RP2040BootromFunction rp2040_bootrom_functions[] = {
     RP2040_BOOTROM_NYI(RP2040_ROM_TABLE_CODE('U', 'B'), "reset_usb_boot"),
 };
 
+static const RP2040BootromData rp2040_bootrom_data[] = {
+    { RP2040_ROM_TABLE_CODE('S', 'F'), RP2040_BOOTROM_FLOAT_TABLE_OFFSET + 2 },
+    { RP2040_ROM_TABLE_CODE('S', 'D'), RP2040_BOOTROM_DOUBLE_TABLE_OFFSET + 2 },
+};
+
 static const uint8_t rp2040_bootrom_lookup[] = {
     0x02, 0x88,             /* ldrh r2, [r0] */
     0x00, 0x2a,             /* cmp r2, #0 */
@@ -341,10 +359,15 @@ static void rp2040_install_synthetic_bootrom(void)
 {
     g_autofree uint8_t *rom = g_malloc0(RP2040_ROM_SIZE);
     uint32_t func_base = RP2040_BOOTROM_STUBS_OFFSET;
-    uint32_t table = RP2040_BOOTROM_FUNC_TABLE_OFFSET;
+    uint32_t func_table = RP2040_BOOTROM_FUNC_TABLE_OFFSET;
+    uint32_t data_table = RP2040_BOOTROM_DATA_TABLE_OFFSET;
+    uint32_t float_nyi = RP2040_BOOTROM_FLOAT_NYI_STUB_OFFSET | 1;
+    uint32_t double_nyi = RP2040_BOOTROM_DOUBLE_NYI_STUB_OFFSET | 1;
     int i;
 
     memcpy(rom, rp2040_bootrom, sizeof(rp2040_bootrom));
+    rom[RP2040_BOOTROM_ROM_VERSION_OFFSET] =
+        RP2040_BOOTROM_SYNTHETIC_ROM_VERSION;
     memcpy(rom + RP2040_BOOTROM_LOOKUP_OFFSET, rp2040_bootrom_lookup,
            sizeof(rp2040_bootrom_lookup));
 
@@ -372,12 +395,43 @@ static void rp2040_install_synthetic_bootrom(void)
             func_base += ROUND_UP(sizeof(rp2040_bootrom_nyi_stub), 4);
         }
 
-        rp2040_store_hword(rom,
-                           table + i * RP2040_BOOTROM_FUNC_TABLE_ENTRY_SIZE,
+        rp2040_store_hword(rom, func_table +
+                           i * RP2040_BOOTROM_FUNC_TABLE_ENTRY_SIZE,
                            func->code);
-        rp2040_store_hword(rom,
-                           table + i * RP2040_BOOTROM_FUNC_TABLE_ENTRY_SIZE + 2,
+        rp2040_store_hword(rom, func_table +
+                           i * RP2040_BOOTROM_FUNC_TABLE_ENTRY_SIZE + 2,
                            entry);
+    }
+
+    memcpy(rom + RP2040_BOOTROM_FLOAT_NYI_STUB_OFFSET, rp2040_bootrom_nyi_stub,
+           sizeof(rp2040_bootrom_nyi_stub));
+    rp2040_store_word(rom, RP2040_BOOTROM_FLOAT_NYI_STUB_OFFSET +
+                      RP2040_BOOTROM_NYI_CODE_LITERAL_OFFSET,
+                      RP2040_ROM_TABLE_CODE('S', 'F'));
+    memcpy(rom + RP2040_BOOTROM_DOUBLE_NYI_STUB_OFFSET, rp2040_bootrom_nyi_stub,
+           sizeof(rp2040_bootrom_nyi_stub));
+    rp2040_store_word(rom, RP2040_BOOTROM_DOUBLE_NYI_STUB_OFFSET +
+                      RP2040_BOOTROM_NYI_CODE_LITERAL_OFFSET,
+                      RP2040_ROM_TABLE_CODE('S', 'D'));
+
+    rom[RP2040_BOOTROM_FLOAT_TABLE_OFFSET] = RP2040_BOOTROM_FLOAT_TABLE_WORDS;
+    rom[RP2040_BOOTROM_DOUBLE_TABLE_OFFSET] = RP2040_BOOTROM_FLOAT_TABLE_WORDS;
+    for (i = 0; i < RP2040_BOOTROM_FLOAT_TABLE_WORDS; i++) {
+        rp2040_store_word(rom, RP2040_BOOTROM_FLOAT_TABLE_OFFSET + 2 +
+                          i * sizeof(uint32_t), float_nyi);
+        rp2040_store_word(rom, RP2040_BOOTROM_DOUBLE_TABLE_OFFSET + 2 +
+                          i * sizeof(uint32_t), double_nyi);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(rp2040_bootrom_data); i++) {
+        const RP2040BootromData *data = &rp2040_bootrom_data[i];
+
+        rp2040_store_hword(rom, data_table +
+                           i * RP2040_BOOTROM_DATA_TABLE_ENTRY_SIZE,
+                           data->code);
+        rp2040_store_hword(rom, data_table +
+                           i * RP2040_BOOTROM_DATA_TABLE_ENTRY_SIZE + 2,
+                           data->offset);
     }
 
     rom_add_blob_fixed("rp2040.bootrom", rom, RP2040_ROM_SIZE,
