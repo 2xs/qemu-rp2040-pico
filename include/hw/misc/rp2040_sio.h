@@ -34,6 +34,11 @@ struct RP2040SioState {
     uint8_t fifo_wptr[RP2040_SIO_NUM_CORES];
     uint8_t fifo_level[RP2040_SIO_NUM_CORES];
     uint32_t fifo_sticky[RP2040_SIO_NUM_CORES];
+    uint32_t div_dividend[RP2040_SIO_NUM_CORES];
+    uint32_t div_divisor[RP2040_SIO_NUM_CORES];
+    uint32_t div_quotient[RP2040_SIO_NUM_CORES];
+    uint32_t div_remainder[RP2040_SIO_NUM_CORES];
+    bool div_dirty[RP2040_SIO_NUM_CORES];
     uint32_t spinlock_st;
 };
 

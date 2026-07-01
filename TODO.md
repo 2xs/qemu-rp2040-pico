@@ -352,11 +352,16 @@ Current clock/reset bring-up note:
 - The SIO block now provides `CPUID`, user GPIO and QSPI `GPIO_HI`
   output/output-enable registers with set/clear/xor operations, 8-entry
   inter-core FIFOs, FIFO `VLD`/`RDY`/`ROE`/`WOF` status, proc0/proc1 FIFO IRQ
-  outputs, and simple hardware spinlock claim/release semantics. With the
-  synthetic ROM, core1 starts at reset and waits in ROM for the SDK FIFO launch
-  sequence. With an external mask ROM, core1 remains powered off until the
-  faithful core1 ROM path is modeled. The divider and interpolators remain
-  future work.
+  outputs, simple hardware spinlock claim/release semantics, and immediate
+  SIO hardware divider results with `READY`/`DIRTY` status. With the synthetic
+  ROM, core1 starts at reset and waits in ROM for the SDK FIFO launch sequence.
+  With an external mask ROM, core1 remains powered off until the faithful core1
+  ROM path is modeled. Interpolators remain future work.
+- RP2040 peripheral `LOG_UNIMP` traces are reserved for offsets or operations
+  that are not handled at all. Minimal/stubbed registers that return a stable
+  value or store/ignore a documented write should stay silent under `-d unimp`;
+  explicit NYI diagnostics remain for missing behavior such as unsupported boot
+  ROM helpers or unimplemented flash commands.
 
 ## Phase 13: SIO Multicore Groundwork
 
@@ -368,6 +373,17 @@ Current clock/reset bring-up note:
 - [x] Add FIFO IRQ outputs for proc0/proc1.
 - [x] Route only proc0 FIFO IRQ while the model still has one Cortex-M0+.
 - [x] Add a functional test for core0-visible SIO FIFO status and sticky bits.
+- [x] Implement the per-core SIO hardware divider registers:
+  `DIV_UDIVIDEND`, `DIV_UDIVISOR`, `DIV_SDIVIDEND`, `DIV_SDIVISOR`,
+  `DIV_QUOTIENT`, `DIV_REMAINDER`, and `DIV_CSR`.
+- [x] Add a functional test for unsigned division, signed division, division by
+  zero, result save/restore writes, and `READY`/`DIRTY` behavior.
+- [x] Stop logging implemented SIO accesses as `LOG_UNIMP`; only genuinely
+  unsupported SIO offsets now emit unimplemented traces.
+- [x] Apply the same `LOG_UNIMP` policy to the other current RP2040 peripheral
+  models: clocks, resets, watchdog, PLL/XOSC/ROSC, syscfg/sysinfo, tbman,
+  vreg, timer, DMA, IO_QSPI, USBCTRL register storage, and XIP/SSI register
+  access.
 - [ ] Add qtest coverage that can exercise both FIFO directions without
   requiring a second Cortex-M0+ to execute guest code.
 

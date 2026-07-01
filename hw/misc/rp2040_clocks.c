@@ -223,6 +223,11 @@ static uint64_t rp2040_clocks_read(void *opaque, hwaddr addr, unsigned size)
 
     if (offset >= sizeof(s->regs)) {
         value = 0;
+        qemu_log_mask(LOG_UNIMP, "rp2040.clocks: unimplemented read  "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
+                      size, RP2040_CLOCKS_BASE + addr, offset, size << 1,
+                      value);
     } else if (rp2040_clocks_is_selected(offset)) {
         value = rp2040_clocks_selected(s, offset);
     } else {
@@ -243,10 +248,6 @@ static uint64_t rp2040_clocks_read(void *opaque, hwaddr addr, unsigned size)
         }
     }
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.clocks: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_CLOCKS_BASE + addr, offset, size << 1, value);
     return value;
 }
 
@@ -287,14 +288,14 @@ static void rp2040_clocks_write(void *opaque, hwaddr addr,
             rp2040_clocks_update(s);
             break;
         }
+    } else if (offset >= sizeof(s->regs)) {
+        qemu_log_mask(LOG_UNIMP, "rp2040.clocks: unimplemented write "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
+                      ", value 0x%0*" PRIx64 ")\n",
+                      size, RP2040_CLOCKS_BASE + addr, offset,
+                      size << 1, value);
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.clocks: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_CLOCKS_BASE + addr, offset,
-                  size << 1, value);
 }
 
 static const MemoryRegionOps rp2040_clocks_ops = {

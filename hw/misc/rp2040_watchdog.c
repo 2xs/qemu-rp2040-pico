@@ -180,15 +180,17 @@ static uint64_t rp2040_watchdog_read(void *opaque, hwaddr addr, unsigned size)
             value = s->scratch[scratch];
         } else {
             value = 0;
+            qemu_log_mask(LOG_UNIMP, "rp2040.watchdog: "
+                          "unimplemented read  "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx
+                          ") -> 0x%0*" PRIx64 "\n",
+                          size, RP2040_WATCHDOG_BASE + addr, offset,
+                          size << 1, value);
         }
         break;
     }
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.watchdog: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_WATCHDOG_BASE + addr, offset, size << 1,
-                  value);
     return value;
 }
 
@@ -233,16 +235,17 @@ static void rp2040_watchdog_write(void *opaque, hwaddr addr,
             s->scratch[scratch] =
                 rp2040_watchdog_apply_alias(s->scratch[scratch], value,
                                             alias);
+        } else {
+            qemu_log_mask(LOG_UNIMP, "rp2040.watchdog: "
+                          "unimplemented write "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx
+                          ", value 0x%0*" PRIx64 ")\n",
+                          size, RP2040_WATCHDOG_BASE + addr, offset,
+                          size << 1, value64);
         }
         break;
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.watchdog: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_WATCHDOG_BASE + addr, offset, size << 1,
-                  value64);
 }
 
 static const MemoryRegionOps rp2040_watchdog_ops = {

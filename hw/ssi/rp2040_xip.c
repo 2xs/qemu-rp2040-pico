@@ -430,15 +430,14 @@ static uint64_t rp2040_xip_ctrl_read(void *opaque, hwaddr addr, unsigned size)
         break;
     default:
         value = 0;
+        qemu_log_mask(LOG_UNIMP, "rp2040.xip.ctrl: unimplemented read  "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
+                      ") -> 0x%0*" PRIx64 "\n",
+                      size, RP2040_XIP_CTRL_BASE + addr, offset,
+                      size << 1, value);
         break;
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.xip.ctrl: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_XIP_CTRL_BASE + addr, offset,
-                  size << 1, value);
 
     return value;
 }
@@ -461,15 +460,14 @@ static void rp2040_xip_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
     case 0x10:
         break;
     default:
+        qemu_log_mask(LOG_UNIMP, "rp2040.xip.ctrl: unimplemented write "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
+                      ", value 0x%0*" PRIx64 ")\n",
+                      size, RP2040_XIP_CTRL_BASE + addr, offset,
+                      size << 1, value);
         break;
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.xip.ctrl: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_XIP_CTRL_BASE + addr, offset,
-                  size << 1, value);
 }
 
 static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
@@ -490,12 +488,6 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
         } else {
             ret = 0;
         }
-        qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: read  "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ") -> 0x%0*" PRIx64 "\n",
-                      size, RP2040_XIP_SSI_BASE + addr, offset,
-                      size << 1, ret);
         return ret;
     }
 
@@ -559,15 +551,14 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
         break;
     default:
         ret = 0;
+        qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: unimplemented read  "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
+                      ") -> 0x%0*" PRIx64 "\n",
+                      size, RP2040_XIP_SSI_BASE + addr, offset,
+                      size << 1, ret);
         break;
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_XIP_SSI_BASE + addr, offset,
-                  size << 1, ret);
 
     return ret;
 }
@@ -583,12 +574,6 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
 
     if (offset >= RP2040_SSI_DR0 && offset <= RP2040_SSI_DR_END) {
         rp2040_xip_dr_write(s, value & 0xff);
-        qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: write "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ", value 0x%0*" PRIx64 ")\n",
-                      size, RP2040_XIP_SSI_BASE + addr, offset,
-                      size << 1, value);
         return;
     }
 
@@ -634,15 +619,14 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
         s->spi_ctrlr0 = rp2040_xip_apply_alias(s->spi_ctrlr0, value, alias);
         break;
     default:
+        qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: unimplemented write "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
+                      ", value 0x%0*" PRIx64 ")\n",
+                      size, RP2040_XIP_SSI_BASE + addr, offset,
+                      size << 1, value);
         break;
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_XIP_SSI_BASE + addr, offset,
-                  size << 1, value);
 }
 
 static const MemoryRegionOps rp2040_xip_ops = {

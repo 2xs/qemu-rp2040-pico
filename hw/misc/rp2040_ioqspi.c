@@ -115,15 +115,16 @@ static uint64_t rp2040_ioqspi_read(void *opaque, hwaddr addr, unsigned size)
             break;
         default:
             value = 0;
+            qemu_log_mask(LOG_UNIMP, "rp2040.ioqspi: unimplemented read  "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx
+                          ") -> 0x%0*" PRIx64 "\n",
+                          size, RP2040_IOQSPI_BASE + addr, offset,
+                          size << 1, value);
             break;
         }
     }
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.ioqspi: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_IOQSPI_BASE + addr, offset, size << 1,
-                  value);
     return value;
 }
 
@@ -178,16 +179,18 @@ static void rp2040_ioqspi_write(void *opaque, hwaddr addr,
                 IOQSPI_IRQ_MASK;
             break;
         default:
+            if (!rp2040_ioqspi_status_offset(offset)) {
+                qemu_log_mask(LOG_UNIMP, "rp2040.ioqspi: "
+                              "unimplemented write "
+                              "(size %d, addr 0x%08" HWADDR_PRIx
+                              ", offset 0x%04" HWADDR_PRIx
+                              ", value 0x%0*" PRIx64 ")\n",
+                              size, RP2040_IOQSPI_BASE + addr, offset,
+                              size << 1, value64);
+            }
             break;
         }
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.ioqspi: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_IOQSPI_BASE + addr, offset, size << 1,
-                  value64);
 }
 
 static const MemoryRegionOps rp2040_ioqspi_ops = {
