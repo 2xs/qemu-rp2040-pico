@@ -426,6 +426,31 @@ Current SDK compatibility note:
   Default Pico SDK RP2040 builds may call the boot ROM function table; QEMU's
   synthetic ROM does not expose that ABI yet.
 
+## Phase 15a: Synthetic Boot ROM Function Table
+
+- [x] Add a shared RP2040 `Not yet implemented` diagnostic helper based on
+  QEMU's `LOG_UNIMP` log mask.
+- [x] Add a QEMU-only synthetic ROM diagnostic MMIO register used by synthetic
+  boot ROM stubs to report the missing boot ROM function.
+- [x] Populate the RP2040 well-known boot ROM halfword pointers at offsets
+  `0x14`, `0x16`, and `0x18` in the synthetic ROM image.
+- [x] Add an RP2040-compatible `rom_table_lookup()` routine to the synthetic
+  ROM.
+- [x] Add a first function table containing the RP2040 boot ROM function codes
+  used by Pico SDK headers.
+- [x] Route every function-table entry to an explicit NYI stub that logs the
+  boot ROM function name and then faults, instead of failing silently.
+- [ ] Replace the `memcpy`, `memset`, `clz32`, `ctz32`, `popcount32`, and
+  `reverse32` NYI stubs with real synthetic ROM implementations.
+- [ ] Add no-SDK tests for each implemented bit/memory boot ROM helper.
+- [ ] Re-run Pico SDK smoke tests without forcing compiler bit/mem helper
+  implementations.
+- [ ] Implement or deliberately document the flash-related boot ROM helper
+  policy: `connect_internal_flash`, `flash_exit_xip`, `flash_flush_cache`,
+  `flash_enter_cmd_xip`, `flash_range_erase`, and `flash_range_program`.
+- [ ] Convert shallow RP2040 peripheral models to use the shared NYI helper for
+  unimplemented-but-visible register behavior.
+
 ## Phase 16: Documentation
 
 - [x] Add user documentation for the `raspi-pico` machine.
