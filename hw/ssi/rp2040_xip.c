@@ -15,6 +15,7 @@
 #include "hw/ssi/rp2040_xip.h"
 #include "qemu/log.h"
 #include "system/address-spaces.h"
+#include "trace.h"
 
 #define RP2040_XIP_CTRL_EN           0x1
 #define RP2040_XIP_CTRL_ERR_BADWRITE 0x2
@@ -270,6 +271,10 @@ static void rp2040_xip_program(RP2040XipState *s)
     unsigned data_len;
     unsigned i;
 
+    trace_rp2040_xip_program(s->tx_len >= 4 ? rp2040_xip_tx_addr(s) : 0,
+                             s->tx_len > 4 ? s->tx_len - 4 : 0,
+                             s->write_enable);
+
     if (!s->write_enable) {
         return;
     }
@@ -302,6 +307,9 @@ static void rp2040_xip_erase(RP2040XipState *s)
     uint32_t addr;
     uint32_t base;
 
+    trace_rp2040_xip_erase(s->tx_len >= 4 ? rp2040_xip_tx_addr(s) : 0,
+                           s->write_enable);
+
     if (!s->write_enable) {
         return;
     }
@@ -329,6 +337,8 @@ static void rp2040_xip_finish_command(RP2040XipState *s)
     if (s->tx_len == 0) {
         return;
     }
+
+    trace_rp2040_xip_finish_command(s->tx[0], s->tx_len);
 
     switch (s->tx[0]) {
     case FLASH_CMD_WRITE_STATUS:
@@ -366,6 +376,7 @@ static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
         break;
     case FLASH_CMD_WRITE_ENABLE:
         s->write_enable = true;
+        rp2040_xip_rx_push(s, 0);
         rp2040_xip_reset_tx(s);
         break;
     case FLASH_CMD_READ_STATUS:
@@ -628,10 +639,15 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
     RP2040XipState *s = opaque;
     hwaddr alias = addr & ATOMIC_ALIAS_MASK;
     hwaddr offset = addr & 0xfff;
+    uint32_t old_ssienr = s->ssienr;
     uint32_t old_ser = s->ser;
     uint32_t new_value;
 
     if (offset >= RP2040_SSI_DR0 && offset <= RP2040_SSI_DR_END) {
+        if (s->tx_len < 8 || (s->tx_len & 0x3f) == 0) {
+            trace_rp2040_xip_dr_write(value, size, s->tx_len, s->ctrlr0,
+                                      s->ctrlr1, s->spi_ctrlr0);
+        }
         rp2040_xip_dr_write(s, value & 0xff);
         return;
     }
@@ -639,13 +655,19 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
     switch (offset) {
     case RP2040_SSI_CTRLR0:
         s->ctrlr0 = rp2040_xip_apply_alias(s->ctrlr0, value, alias);
+        trace_rp2040_xip_ctrlr0(s->ctrlr0);
         break;
     case RP2040_SSI_CTRLR1:
         s->ctrlr1 = rp2040_xip_apply_alias(s->ctrlr1, value, alias);
+        trace_rp2040_xip_ctrlr1(s->ctrlr1);
         break;
     case RP2040_SSI_SSIENR:
         new_value = rp2040_xip_apply_alias(s->ssienr, value, alias);
         s->ssienr = new_value & 1;
+        trace_rp2040_xip_ssienr(old_ssienr, s->ssienr, s->tx_len);
+        if ((old_ssienr & 1) && !s->ssienr) {
+            rp2040_xip_finish_command(s);
+        }
         if (!s->ssienr) {
             rp2040_xip_rx_clear(s);
             rp2040_xip_reset_tx(s);
@@ -654,6 +676,7 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
     case RP2040_SSI_SER:
         new_value = rp2040_xip_apply_alias(s->ser, value, alias);
         s->ser = new_value & 1;
+        trace_rp2040_xip_ser(old_ser, s->ser, s->tx_len);
         if ((old_ser & 1) && !s->ser) {
             rp2040_xip_finish_command(s);
         }
@@ -680,6 +703,7 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
         break;
     case RP2040_SSI_SPI_CTRLR0:
         s->spi_ctrlr0 = rp2040_xip_apply_alias(s->spi_ctrlr0, value, alias);
+        trace_rp2040_xip_spi_ctrlr0(s->spi_ctrlr0);
         break;
     default:
         qemu_log_mask(LOG_UNIMP, "rp2040.xip.ssi: unimplemented write "
@@ -727,6 +751,23 @@ static const MemoryRegionOps rp2040_xip_ssi_ops = {
 void rp2040_xip_set_writable(RP2040XipState *s, bool writable)
 {
     s->xip_writable = writable;
+}
+
+void rp2040_xip_qspi_cs(RP2040XipState *s, bool high)
+{
+    if (s->qspi_cs_high == high) {
+        return;
+    }
+
+    trace_rp2040_xip_qspi_cs(high, s->tx_len);
+    s->qspi_cs_high = high;
+
+    if (high) {
+        rp2040_xip_finish_command(s);
+    } else {
+        rp2040_xip_rx_clear(s);
+        rp2040_xip_reset_tx(s);
+    }
 }
 
 static bool rp2040_xip_load_elf(RP2040XipState *s, const char *filename,
@@ -1052,6 +1093,7 @@ static void rp2040_xip_reset(DeviceState *dev)
     s->spi_ctrlr0 = 0;
     s->write_enable = false;
     s->busy = false;
+    s->qspi_cs_high = true;
     rp2040_xip_reset_tx(s);
     rp2040_xip_rx_clear(s);
 }

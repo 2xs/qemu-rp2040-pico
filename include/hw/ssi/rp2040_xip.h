@@ -45,6 +45,7 @@ struct RP2040XipState {
 
     bool write_enable;
     bool busy;
+    bool qspi_cs_high;
     uint8_t tx[260];
     unsigned tx_len;
     bool tx_unsupported_logged;
@@ -56,6 +57,7 @@ struct RP2040XipState {
 void rp2040_xip_set_writable(RP2040XipState *s, bool writable);
 void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
                            Error **errp);
+void rp2040_xip_qspi_cs(RP2040XipState *s, bool high);
 bool rp2040_xip_flash_range_erase(RP2040XipState *s, uint32_t flash_offs,
                                   uint32_t count, uint32_t block_size,
                                   uint8_t block_cmd, Error **errp);
