@@ -1706,6 +1706,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     qdev_connect_gpio_out_named(DEVICE(&s->iobank0), "uart0-pin", 1,
                                 qemu_allocate_irq(rp2040_set_uart_pin, s, 1));
 
+    object_property_set_link(OBJECT(&s->ioqspi), "xip", OBJECT(&s->xip),
+                             &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ioqspi), errp)) {
         return;
     }

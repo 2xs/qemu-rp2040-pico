@@ -361,8 +361,8 @@ Current clock/reset bring-up note:
   outputs, simple hardware spinlock claim/release semantics, and immediate
   SIO hardware divider results with `READY`/`DIRTY` status. With the synthetic
   ROM, core1 starts at reset and waits in ROM for the SDK FIFO launch sequence.
-  With an external mask ROM, core1 remains powered off until the faithful core1
-  ROM path is modeled. Interpolators remain future work.
+  With the RFC `pipico.rom`, core1 starts from the mask-ROM path when core0
+  launches it through the SDK FIFO protocol. Interpolators remain future work.
 - RP2040 peripheral `LOG_UNIMP` traces are reserved for offsets or operations
   that are not handled at all. Minimal/stubbed registers that return a stable
   value or store/ignore a documented write should stay silent under `-d unimp`;
@@ -546,7 +546,7 @@ Current SDK compatibility note:
   the required SIO/lockout behavior is understood.
 - [x] After the atomic synthetic service passes, add a second test mode that
   exercises the existing flash busy/XIP HardFault policy during erase/program.
-- [ ] Try the same SDK image with `-bios pipico.rom` after the external mask
+- [x] Try the same SDK image with `-bios pipico.rom` after the external mask
   ROM path can launch core1; use this to validate the SIO/FIFO behavior shared
   by the SDK and the real ROM path.
 - [ ] Decide whether synthetic ROM flash helpers should stay atomic for fast
@@ -571,6 +571,11 @@ Current SDK flash-safe note:
   SSI/XIP path: core1 runs its FIFO lockout handler from SRAM, core0 starts a
   page program through SSI, and an XIP read while flash is busy reaches the
   SRAM HardFault handler.
+- The same local SDK image also passes with the RFC `pipico.rom` using
+  `qemu-system-arm -machine raspi-pico,strict-uart-pins=off -bios pipico.rom
+  -kernel .local/rp2040-sdk-tests/flash_safe_multicore/build/flash_safe_multicore.elf`;
+  this validates the shared SIO/FIFO lockout path and the ROM-driven
+  IO_QSPI/XIP flash command path.
 
 ## Phase 16: Documentation
 
