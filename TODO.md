@@ -443,8 +443,11 @@ Current SDK compatibility note:
 - [x] Replace the `memcpy`, `memset`, `clz32`, `ctz32`, `popcount32`, and
   `reverse32` NYI stubs with real synthetic ROM implementations.
 - [x] Add no-SDK tests for each implemented bit/memory boot ROM helper.
-- [ ] Re-run Pico SDK smoke tests without forcing compiler bit/mem helper
+- [x] Re-run Pico SDK smoke tests without forcing compiler bit/mem helper
   implementations.
+- [x] Add synthetic `SF` and `SD` boot ROM data table entries so Pico SDK
+  float/double runtime init can copy the expected ROM table shape. Entries
+  currently point at explicit NYI stubs rather than real float/double helpers.
 - [ ] Implement or deliberately document the flash-related boot ROM helper
   policy: `connect_internal_flash`, `flash_exit_xip`, `flash_flush_cache`,
   `flash_enter_cmd_xip`, `flash_range_erase`, and `flash_range_program`.
