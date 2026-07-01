@@ -25,7 +25,9 @@ stable.
 Supported devices
 -----------------
 
- * Two Cortex-M0+ cores, with core 1 currently instantiated but powered off
+ * Two Cortex-M0+ cores. With QEMU's synthetic ROM, core 1 starts in ROM and
+   waits for the SDK FIFO launch sequence; with an external ROM image, core 1
+   is currently kept powered off.
  * 16 KiB boot ROM window
  * 264 KiB SRAM
  * 2 MiB external flash contents mapped through the XIP window
@@ -117,10 +119,14 @@ exposes the voltage-regulator, brown-out detector and chip reset status
 registers with stable shallow behaviour.  ``TBMAN.PLATFORM`` reports the
 documented ASIC platform bit.  ``SIO`` implements the core ID, the user and
 QSPI GPIO output/output-enable registers, 8-entry inter-core FIFOs,
-``VLD``/``RDY``/``ROE``/``WOF`` FIFO status, proc0 FIFO IRQ output, and
-hardware spinlock claim/release semantics.  Core1 is instantiated and starts
-powered off.  Its FIFO IRQ output is routed to proc1, and a minimal mask-ROM
-launch shim supports the Pico SDK FIFO sequence ``{0, 0, 1, VTOR, SP, PC}``.
+``VLD``/``RDY``/``ROE``/``WOF`` FIFO status, proc0/proc1 FIFO IRQ outputs, and
+hardware spinlock claim/release semantics.  Core1 is instantiated. With the
+synthetic ROM, it starts at reset, reads ``SIO_CPUID``, and waits in ROM for
+the Pico SDK FIFO sequence ``{0, 0, 1, VTOR, SP, PC}``, echoing each received
+word.  After a valid sequence, the synthetic ROM installs the supplied
+``VTOR`` and main stack pointer, then branches to the supplied entry point.
+With an external ROM image, proc1 remains powered off until the faithful core1
+ROM path is modeled.
 ``PSM`` exposes the force-on, force-off, watchdog-select and done registers
 touched by the Pico SDK core1 reset path; ``FRCE_OFF_PROC1`` is stored,
 reflected in ``DONE``, and used to hold or release proc1.  The SIO divider and
@@ -217,10 +223,9 @@ and then release it before the ROM FIFO launch protocol.  See datasheet pages
 
 The current QEMU model stores the documented bits 0..16, implements the
 RP2040 atomic alias windows, and derives ``DONE`` immediately as the inverse
-of ``FRCE_OFF``.  On reset, ``FRCE_OFF.PROC1`` is set to match the QEMU model
-where proc1 starts powered off.  Releasing this bit drains proc1's incoming
-FIFO and pushes the ready ``0`` expected by the Pico SDK before the launch
-sequence.
+of ``FRCE_OFF``.  On reset, ``FRCE_OFF`` is clear.  Setting
+``FRCE_OFF.PROC1`` powers off proc1 in the QEMU model; clearing it powers
+proc1 back on at the ROM reset vector.
 
 PLL model
 ---------
@@ -341,9 +346,10 @@ timing, or stricter masking of unsupported PL011 modem/IrDA features.
 Known limitations
 -----------------
 
- * Core 0 runs normally.  Core 1 is instantiated and starts powered off; the
-   SDK-compatible wake and FIFO launch sequence is modeled by a QEMU shim,
-   not by executing the real mask ROM core1 path yet.
+ * Core 0 runs normally.  Core 1 starts in the synthetic ROM, echoes the
+   SDK-compatible FIFO launch sequence, installs the provided ``VTOR``/stack,
+   and branches to the provided entry point.  When an external mask ROM is
+   supplied, core 1 is kept powered off until that ROM path is modeled.
  * UART0 currently uses QEMU's PL011 model directly, with the RP2040
    compatibility policy documented above.
  * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
