@@ -581,6 +581,25 @@ class RaspiPicoMachine(QemuSystemTest):
         0x00, 0x40, 0x03, 0x40,
     ])
 
+    # Copies a small routine to SRAM, then exercises the ROM-style flash
+    # command path: QSPI chip select is forced through IO_QSPI, bytes are
+    # exchanged through the XIP SSI data register, and the result is verified
+    # through the XIP flash window.
+    FLASH_IOQSPI_CS_TEST_BIN = bytes.fromhex(
+        '00200420090000104f485049504a914204d20b68036004310430f8e74a480130'
+        '0047c0464b4c002020604b4c4b4820604b4c01202060474c206000f047f800f0'
+        '5ff8202000f054f8002000f051f8102000f04ef8002000f04bf800f056f800f0'
+        '3ef800f033f800f04bf8022000f040f8002000f03df8102000f03af8002000f0'
+        '37f8512000f034f8532000f031f8502000f02ef8492000f02bf800f036f800f0'
+        '1ef83049087851280cd14878532809d18878502806d1c878492803d12a4800f0'
+        '29f8fee7294800f025f8fee700b500f017f8062000f00cf800f017f800bd00b5'
+        '00f00ef8052000f003f800f00ef800bd1f4a10601f4b18680028fcd010687047'
+        '1d4902200002086070471b490320000208607047194a0178002902d011600130'
+        'f9e77047494f5153504920464c415348204f4b0a00494f5153504920464c4153'
+        '48204641494c0a00000000202400001080010010080000180000001800000700'
+        '1000001800100010240100103501001060000018240000180c80014000400340'
+    )
+
     # Attempts a page program without write enable, then verifies the target
     # byte is still in the erased state.
     FLASH_NO_WEL_TEST_BIN = bytes([
@@ -933,6 +952,20 @@ class RaspiPicoMachine(QemuSystemTest):
         self.vm.launch()
 
         wait_for_console_pattern(self, 'FLASH OK')
+
+    def test_flash_program_with_ioqspi_cs(self):
+        self.set_direct_uart_machine()
+
+        image = self.scratch_file('flash-ioqspi-cs.bin')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_bootable_image(
+                self.FLASH_IOQSPI_CS_TEST_BIN))
+
+        self.vm.set_console()
+        self.vm.add_args('-kernel', image)
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'IOQSPI FLASH OK')
 
     def launch_flash_file(self, name, flash, pattern, kernel=None,
                           extra_args=()):
