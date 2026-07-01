@@ -525,4 +525,4 @@ Current SDK compatibility note:
 - [x] UART output is visible on the host.
 - [x] Guest code can read XIP flash contents.
 - [x] Guest code can erase and program at least one flash sector/page.
-- [ ] Flash changes persist in a raw host file across two QEMU runs.
+- [x] Flash changes persist in a raw host file across two QEMU runs.
