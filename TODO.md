@@ -542,7 +542,7 @@ Current SDK compatibility note:
   synthetic flash helper path during the multicore lockout test.
 - [x] Validate that SIO FIFO IRQ delivery, spinlocks, `SEV/WFE`, and proc1
   execution are sufficient for the SDK `multicore_lockout` handshake.
-- [ ] Add a no-SDK functional regression derived from the SDK smoke test once
+- [x] Add a no-SDK functional regression derived from the SDK smoke test once
   the required SIO/lockout behavior is understood.
 - [ ] After the atomic synthetic service passes, add a second test mode that
   exercises the existing flash busy/XIP HardFault policy during erase/program.
@@ -562,6 +562,10 @@ Current SDK flash-safe note:
   ROM it prints `SDK FLASH SAFE OK` and emits synthetic helper traces for
   `connect_internal_flash`, `flash_exit_xip`, `flash_range_erase`,
   `flash_flush_cache`, and `flash_range_program`.
+- The in-tree no-SDK regression `test_flash_safe_multicore_lockout` now
+  reproduces the same core pieces without the SDK: synthetic ROM core1 launch,
+  proc1 FIFO IRQ lockout, SIO spinlock claim/release, synthetic
+  `flash_range_erase/program`, XIP verification, and helper counter checks.
 
 ## Phase 16: Documentation
 

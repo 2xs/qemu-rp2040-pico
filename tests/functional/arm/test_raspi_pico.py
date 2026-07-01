@@ -185,6 +185,39 @@ class RaspiPicoMachine(QemuSystemTest):
         0x00, 0x40, 0x03, 0x40,
     ])
 
+    # No-SDK regression derived from the Pico SDK flash_safe_execute smoke
+    # test. Core 0 launches core 1 through the synthetic ROM FIFO protocol,
+    # core 1 installs a FIFO IRQ lockout handler, core 0 takes a SIO spinlock,
+    # locks out core 1, calls the synthetic flash_range_erase/program helpers,
+    # verifies XIP contents and helper counters, then releases core 1.
+    FLASH_SAFE_MULTICORE_TEST_BIN = bytes.fromhex(
+        '00200420010100108b0200108b02001000000000000000000000000000000000'
+        '0000000000000000000000000000000000000000000000000000000000000000'
+        '0000000000000000000000000000000000000000000000000000000000000000'
+        '0000000000000000000000000000000000000000000000000000000000000000'
+        '4701001000000000000000000000000000000000000000000000000000000000'
+        '0000000000000000000000000000000000000000000000000000000000000000'
+        '0000000000000000000000000000000000000000000000000000000000000000'
+        '0000000000000000000000000000000000000000000000000000000000000000'
+        '00f03cf800f050f8704800f095f840bf6f4800f0aaf800f050f86e4800f08cf8'
+        '40bf6d4800f0a1f800f043f86b4800f0a3f8fee76a486b4901606b486b490160'
+        '62b620bffde71fb4744600f07df85f49884210d15e4800f06ff820bf6448016d'
+        '01200142f9d000f06ff85a49884202d1594800f061f80fbc01b0204730b55d4c'
+        '06252068002803d100f066f840bf206800f052f840bf00f057f82168884274d1'
+        '0434013dedd130bd5348016800296cd07047514800210160704770b54f480021'
+        '002201231b028154013101329a42fad14b4c4c48606001200003a0600020e060'
+        '202020614848206048480021002201231b02855cff26b54247d101329a42f8d1'
+        '404860603d48a06001200002e060404820603e480021002201231b02855c8d42'
+        '33d1013101329a42f8d1206d01282cd1606d012829d170bd0eb52d490a6d0223'
+        '1a42fbd048650ebd0eb529490a6d01231a42fbd0886d0ebd0fb525490a6d0123'
+        '1a4201d0886df9e70fbd10b50446fff7ebffa04209d110bd06b526490278002a'
+        '02d00a600130f9e706bd2348fff7f4fffee7c046000000000000000001000000'
+        '000000100010042035010010464c4153482053414645204f4b0a00464c415348'
+        '2053414645204641494c0a00edfecefa0100cefaefbecefa0200cefaac020010'
+        '08ed00e00000001000e100e000000100000000d094020010000100d000000020'
+        '0000ff5f0010100052450000001010105250000000400340bb020010'
+    )
+
     # Calls synthetic boot ROM helpers through the RP2040 rom_table_lookup()
     # ABI and verifies bit, byte-memory, and word-memory helper results.
     BOOTROM_HELPERS_TEST_BIN = bytes([
@@ -728,6 +761,20 @@ class RaspiPicoMachine(QemuSystemTest):
         self.vm.launch()
 
         wait_for_console_pattern(self, 'core 0 and core 1 working !')
+
+    def test_flash_safe_multicore_lockout(self):
+        self.set_direct_uart_machine()
+
+        image = self.scratch_file('flash-safe-multicore-test.bin')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_bootable_image(
+                self.FLASH_SAFE_MULTICORE_TEST_BIN))
+
+        self.vm.set_console()
+        self.vm.add_args('-kernel', image)
+        self.vm.launch()
+
+        wait_for_console_pattern(self, 'FLASH SAFE OK')
 
     def test_synthetic_bootrom_helpers(self):
         self.set_direct_uart_machine()
