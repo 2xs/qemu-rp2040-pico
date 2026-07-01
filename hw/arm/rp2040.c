@@ -42,9 +42,18 @@
 #define RP2040_BOOTROM_FUNC_TABLE_ENTRY_SIZE 4
 #define RP2040_BOOTROM_DATA_TABLE_ENTRY_SIZE 4
 #define RP2040_BOOTROM_NYI_CODE_LITERAL_OFFSET 20
+#define RP2040_BOOTROM_HELPER_NOARG_CODE_LITERAL_OFFSET 8
+#define RP2040_BOOTROM_HELPER_ARGS4_CODE_LITERAL_OFFSET 24
+#define RP2040_BOOTROM_HELPER_ARGS3_CODE_LITERAL_OFFSET 20
 #define RP2040_BOOTROM_ROM_VERSION_OFFSET 0x13
 #define RP2040_BOOTROM_SYNTHETIC_ROM_VERSION 2
 #define RP2040_BOOTROM_FLOAT_TABLE_WORDS 32
+
+#define RP2040_SYNTHETIC_ROM_DBG_CMD  0x00
+#define RP2040_SYNTHETIC_ROM_DBG_ARG0 0x04
+#define RP2040_SYNTHETIC_ROM_DBG_ARG1 0x08
+#define RP2040_SYNTHETIC_ROM_DBG_ARG2 0x0c
+#define RP2040_SYNTHETIC_ROM_DBG_ARG3 0x10
 
 #define USBCTRL_ADDR_ENDP       0x00
 #define USBCTRL_SIE_CTRL        0x4c
@@ -205,6 +214,7 @@ typedef struct RP2040BootromFunction {
     const char *name;
     const uint8_t *impl;
     size_t impl_size;
+    uint32_t code_literal_offset;
 } RP2040BootromFunction;
 
 typedef struct RP2040BootromData {
@@ -265,23 +275,75 @@ static const uint8_t rp2040_bootrom_memset4[] = {
     0x70, 0x47,
 };
 
+static const uint8_t rp2040_bootrom_flash_noarg[] = {
+    0x01, 0x49,             /* ldr r1, [pc, #4] ; function code */
+    0x02, 0x48,             /* ldr r0, [pc, #8] ; debug base */
+    0x01, 0x60,             /* str r1, [r0] */
+    0x70, 0x47,             /* bx lr */
+    0x00, 0x00, 0x00, 0x00, /* function code literal */
+    0x00, 0x00, 0xff, 0x5f, /* 0x5fff0000 */
+};
+
+static const uint8_t rp2040_bootrom_flash_args4[] = {
+    0x10, 0xb5,             /* push {r4, lr} */
+    0x04, 0x4c,             /* ldr r4, [pc, #16] ; debug base */
+    0x60, 0x60,             /* str r0, [r4, #4] */
+    0xa1, 0x60,             /* str r1, [r4, #8] */
+    0xe2, 0x60,             /* str r2, [r4, #12] */
+    0x23, 0x61,             /* str r3, [r4, #16] */
+    0x02, 0x48,             /* ldr r0, [pc, #8] ; function code */
+    0x20, 0x60,             /* str r0, [r4] */
+    0x10, 0xbd,             /* pop {r4, pc} */
+    0xc0, 0x46,             /* nop; align literal */
+    0x00, 0x00, 0xff, 0x5f, /* 0x5fff0000 */
+    0x00, 0x00, 0x00, 0x00, /* function code literal */
+};
+
+static const uint8_t rp2040_bootrom_flash_args3[] = {
+    0x10, 0xb5,             /* push {r4, lr} */
+    0x03, 0x4c,             /* ldr r4, [pc, #12] ; debug base */
+    0x60, 0x60,             /* str r0, [r4, #4] */
+    0xa1, 0x60,             /* str r1, [r4, #8] */
+    0xe2, 0x60,             /* str r2, [r4, #12] */
+    0x02, 0x48,             /* ldr r0, [pc, #8] ; function code */
+    0x20, 0x60,             /* str r0, [r4] */
+    0x10, 0xbd,             /* pop {r4, pc} */
+    0x00, 0x00, 0xff, 0x5f, /* 0x5fff0000 */
+    0x00, 0x00, 0x00, 0x00, /* function code literal */
+};
+
 #define RP2040_BOOTROM_IMPL(_code, _name, _impl) \
-    { _code, _name, _impl, sizeof(_impl) }
+    { _code, _name, _impl, sizeof(_impl), UINT32_MAX }
+#define RP2040_BOOTROM_IMPL_CODE(_code, _name, _impl, _offset) \
+    { _code, _name, _impl, sizeof(_impl), _offset }
 #define RP2040_BOOTROM_NYI(_code, _name) \
-    { _code, _name, NULL, 0 }
+    { _code, _name, NULL, 0, UINT32_MAX }
 
 static const RP2040BootromFunction rp2040_bootrom_functions[] = {
-    RP2040_BOOTROM_NYI(RP2040_ROM_TABLE_CODE('C', 'X'),
-                       "flash_enter_cmd_xip"),
-    RP2040_BOOTROM_NYI(RP2040_ROM_TABLE_CODE('E', 'X'), "flash_exit_xip"),
-    RP2040_BOOTROM_NYI(RP2040_ROM_TABLE_CODE('F', 'C'),
-                       "flash_flush_cache"),
-    RP2040_BOOTROM_NYI(RP2040_ROM_TABLE_CODE('I', 'F'),
-                       "connect_internal_flash"),
-    RP2040_BOOTROM_NYI(RP2040_ROM_TABLE_CODE('R', 'E'),
-                       "flash_range_erase"),
-    RP2040_BOOTROM_NYI(RP2040_ROM_TABLE_CODE('R', 'P'),
-                       "flash_range_program"),
+    RP2040_BOOTROM_IMPL_CODE(RP2040_ROM_TABLE_CODE('C', 'X'),
+                             "flash_enter_cmd_xip",
+                             rp2040_bootrom_flash_noarg,
+                             RP2040_BOOTROM_HELPER_NOARG_CODE_LITERAL_OFFSET),
+    RP2040_BOOTROM_IMPL_CODE(RP2040_ROM_TABLE_CODE('E', 'X'),
+                             "flash_exit_xip",
+                             rp2040_bootrom_flash_noarg,
+                             RP2040_BOOTROM_HELPER_NOARG_CODE_LITERAL_OFFSET),
+    RP2040_BOOTROM_IMPL_CODE(RP2040_ROM_TABLE_CODE('F', 'C'),
+                             "flash_flush_cache",
+                             rp2040_bootrom_flash_noarg,
+                             RP2040_BOOTROM_HELPER_NOARG_CODE_LITERAL_OFFSET),
+    RP2040_BOOTROM_IMPL_CODE(RP2040_ROM_TABLE_CODE('I', 'F'),
+                             "connect_internal_flash",
+                             rp2040_bootrom_flash_noarg,
+                             RP2040_BOOTROM_HELPER_NOARG_CODE_LITERAL_OFFSET),
+    RP2040_BOOTROM_IMPL_CODE(RP2040_ROM_TABLE_CODE('R', 'E'),
+                             "flash_range_erase",
+                             rp2040_bootrom_flash_args4,
+                             RP2040_BOOTROM_HELPER_ARGS4_CODE_LITERAL_OFFSET),
+    RP2040_BOOTROM_IMPL_CODE(RP2040_ROM_TABLE_CODE('R', 'P'),
+                             "flash_range_program",
+                             rp2040_bootrom_flash_args3,
+                             RP2040_BOOTROM_HELPER_ARGS3_CODE_LITERAL_OFFSET),
     RP2040_BOOTROM_IMPL(RP2040_ROM_TABLE_CODE('C', '4'), "memcpy44",
                         rp2040_bootrom_memcpy44),
     RP2040_BOOTROM_IMPL(RP2040_ROM_TABLE_CODE('L', '3'), "clz32",
@@ -384,6 +446,10 @@ static void rp2040_install_synthetic_bootrom(void)
 
         if (func->impl) {
             memcpy(rom + func_base, func->impl, func->impl_size);
+            if (func->code_literal_offset != UINT32_MAX) {
+                rp2040_store_word(rom, func_base + func->code_literal_offset,
+                                  func->code);
+            }
             func_base += ROUND_UP(func->impl_size, 4);
         } else {
             memcpy(rom + func_base, rp2040_bootrom_nyi_stub,
@@ -607,10 +673,67 @@ static const char *rp2040_bootrom_function_name(uint16_t code)
 static void rp2040_synthetic_rom_dbg_write(void *opaque, hwaddr addr,
                                            uint64_t value, unsigned size)
 {
+    RP2040State *s = opaque;
+    hwaddr offset = addr & 0xfff;
     uint16_t code = value;
     const char *name = rp2040_bootrom_function_name(code);
     char feature[64];
     char detail[64];
+    Error *local_err = NULL;
+
+    switch (offset) {
+    case RP2040_SYNTHETIC_ROM_DBG_ARG0:
+    case RP2040_SYNTHETIC_ROM_DBG_ARG1:
+    case RP2040_SYNTHETIC_ROM_DBG_ARG2:
+    case RP2040_SYNTHETIC_ROM_DBG_ARG3:
+        s->synthetic_rom_dbg_arg[(offset - RP2040_SYNTHETIC_ROM_DBG_ARG0) /
+                                 sizeof(uint32_t)] = value;
+        return;
+    case RP2040_SYNTHETIC_ROM_DBG_CMD:
+        break;
+    default:
+        rp2040_log_nyi("bootrom", "synthetic diagnostic register write",
+                       "unknown register");
+        return;
+    }
+
+    switch (code) {
+    case RP2040_ROM_TABLE_CODE('C', 'X'):
+        rp2040_log_nyi("bootrom", "flash_enter_cmd_xip",
+                       "synthetic helper does not reconfigure SSI hardware");
+        return;
+    case RP2040_ROM_TABLE_CODE('E', 'X'):
+        rp2040_log_nyi("bootrom", "flash_exit_xip",
+                       "synthetic helper does not send serial flash commands");
+        return;
+    case RP2040_ROM_TABLE_CODE('F', 'C'):
+        rp2040_log_nyi("bootrom", "flash_flush_cache",
+                       "XIP cache is not modeled");
+        return;
+    case RP2040_ROM_TABLE_CODE('I', 'F'):
+        rp2040_log_nyi("bootrom", "connect_internal_flash",
+                       "synthetic helper assumes the QSPI flash is connected");
+        return;
+    case RP2040_ROM_TABLE_CODE('R', 'E'):
+        if (!rp2040_xip_flash_range_erase(&s->xip,
+                                          s->synthetic_rom_dbg_arg[0],
+                                          s->synthetic_rom_dbg_arg[1],
+                                          s->synthetic_rom_dbg_arg[2],
+                                          s->synthetic_rom_dbg_arg[3],
+                                          &local_err)) {
+            warn_report_err(local_err);
+        }
+        return;
+    case RP2040_ROM_TABLE_CODE('R', 'P'):
+        if (!rp2040_xip_flash_range_program(&s->xip,
+                                            s->synthetic_rom_dbg_arg[0],
+                                            s->synthetic_rom_dbg_arg[1],
+                                            s->synthetic_rom_dbg_arg[2],
+                                            &local_err)) {
+            warn_report_err(local_err);
+        }
+        return;
+    }
 
     snprintf(feature, sizeof(feature), "boot ROM function '%c%c'",
              code & 0xff, (code >> 8) & 0xff);
@@ -624,8 +747,19 @@ static void rp2040_synthetic_rom_dbg_write(void *opaque, hwaddr addr,
 static uint64_t rp2040_synthetic_rom_dbg_read(void *opaque, hwaddr addr,
                                               unsigned size)
 {
+    RP2040State *s = opaque;
+    hwaddr offset = addr & 0xfff;
+
+    if (offset >= RP2040_SYNTHETIC_ROM_DBG_ARG0 &&
+        offset <= RP2040_SYNTHETIC_ROM_DBG_ARG3 &&
+        QEMU_IS_ALIGNED(offset, sizeof(uint32_t))) {
+        return s->synthetic_rom_dbg_arg[(offset -
+                                         RP2040_SYNTHETIC_ROM_DBG_ARG0) /
+                                        sizeof(uint32_t)];
+    }
+
     rp2040_log_nyi("bootrom", "synthetic diagnostic register read",
-                   "write-only QEMU diagnostic channel");
+                   "unsupported register");
     return 0;
 }
 

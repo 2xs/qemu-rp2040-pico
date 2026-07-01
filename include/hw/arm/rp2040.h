@@ -94,6 +94,7 @@ struct RP2040State {
     qemu_irq nmi_irq[RP2040_NUM_CORES];
     bool irq_level[RP2040_NUM_CORES][RP2040_NUM_IRQS];
     bool mempowerdown_ready;
+    uint32_t synthetic_rom_dbg_arg[4];
 
     Clock *sysclk;
 };

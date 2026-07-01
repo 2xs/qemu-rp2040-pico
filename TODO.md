@@ -448,9 +448,12 @@ Current SDK compatibility note:
 - [x] Add synthetic `SF` and `SD` boot ROM data table entries so Pico SDK
   float/double runtime init can copy the expected ROM table shape. Entries
   currently point at explicit NYI stubs rather than real float/double helpers.
-- [ ] Implement or deliberately document the flash-related boot ROM helper
-  policy: `connect_internal_flash`, `flash_exit_xip`, `flash_flush_cache`,
-  `flash_enter_cmd_xip`, `flash_range_erase`, and `flash_range_program`.
+- [x] Implement the flash-related boot ROM helper policy:
+  `connect_internal_flash`, `flash_exit_xip`, `flash_flush_cache`, and
+  `flash_enter_cmd_xip` are synthetic no-op helpers with explicit NYI traces
+  for their unmodeled SSI/QSPI side effects; `flash_range_erase` and
+  `flash_range_program` delegate to the QEMU XIP flash model and preserve raw
+  flash-file writeback.
 - [ ] Convert shallow RP2040 peripheral models to use the shared NYI helper for
   unimplemented-but-visible register behavior.
 
