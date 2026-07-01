@@ -25,13 +25,14 @@ static uint64_t rp2040_tbman_read(void *opaque, hwaddr addr, unsigned size)
         break;
     default:
         value = 0;
+        qemu_log_mask(LOG_UNIMP, "rp2040.tbman: unimplemented read  "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
+                      size, RP2040_TBMAN_BASE + addr, offset, size << 1,
+                      value);
         break;
     }
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.tbman: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_TBMAN_BASE + addr, offset, size << 1, value);
     return value;
 }
 
@@ -40,7 +41,7 @@ static void rp2040_tbman_write(void *opaque, hwaddr addr,
 {
     hwaddr offset = addr & 0xfff;
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.tbman: write "
+    qemu_log_mask(LOG_UNIMP, "rp2040.tbman: unimplemented write "
                   "(size %d, addr 0x%08" HWADDR_PRIx
                   ", offset 0x%04" HWADDR_PRIx
                   ", value 0x%0*" PRIx64 ")\n",

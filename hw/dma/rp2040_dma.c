@@ -354,14 +354,16 @@ static uint64_t rp2040_dma_read(void *opaque, hwaddr addr, unsigned size)
             break;
         default:
             value = 0;
+            qemu_log_mask(LOG_UNIMP, "rp2040.dma: unimplemented read  "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx
+                          ") -> 0x%0*" PRIx32 "\n",
+                          size, RP2040_DMA_BASE + addr, offset,
+                          size << 1, value);
             break;
         }
     }
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.dma: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx32 "\n",
-                  size, RP2040_DMA_BASE + addr, offset, size << 1, value);
     return value;
 }
 
@@ -436,15 +438,15 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
             }
             break;
         default:
+            qemu_log_mask(LOG_UNIMP, "rp2040.dma: unimplemented write "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx
+                          ", value 0x%0*" PRIx64 ")\n",
+                          size, RP2040_DMA_BASE + addr, offset, size << 1,
+                          value64);
             break;
         }
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.dma: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_DMA_BASE + addr, offset, size << 1, value64);
 }
 
 static const MemoryRegionOps rp2040_dma_ops = {

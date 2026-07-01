@@ -1115,15 +1115,17 @@ static uint64_t rp2040_usbctrl_regs_read(void *opaque, hwaddr addr,
             value = s->usbctrl_reg[offset / sizeof(uint32_t)];
         } else {
             value = 0;
+            qemu_log_mask(LOG_UNIMP, "rp2040.usbctrl_regs: "
+                          "unimplemented read  "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx
+                          ") -> 0x%0*" PRIx64 "\n",
+                          size, RP2040_USBCTRL_REGS_BASE + addr, offset,
+                          size << 1, value);
         }
         break;
     }
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.usbctrl_regs: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_USBCTRL_REGS_BASE + addr, offset,
-                  size << 1, value);
     return value;
 }
 
@@ -1140,14 +1142,14 @@ static void rp2040_usbctrl_regs_write(void *opaque, hwaddr addr,
         old = s->usbctrl_reg[offset / sizeof(uint32_t)];
         s->usbctrl_reg[offset / sizeof(uint32_t)] =
             rp2040_apply_atomic_alias(old, value, alias);
+    } else {
+        qemu_log_mask(LOG_UNIMP, "rp2040.usbctrl_regs: unimplemented write "
+                      "(size %d, addr 0x%08" HWADDR_PRIx
+                      ", offset 0x%04" HWADDR_PRIx
+                      ", value 0x%0*" PRIx64 ")\n",
+                      size, RP2040_USBCTRL_REGS_BASE + addr, offset,
+                      size << 1, value64);
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.usbctrl_regs: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_USBCTRL_REGS_BASE + addr, offset,
-                  size << 1, value64);
 }
 
 static const MemoryRegionOps rp2040_usbctrl_regs_ops = {

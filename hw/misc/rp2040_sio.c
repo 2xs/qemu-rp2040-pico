@@ -36,6 +36,13 @@
 #define SIO_FIFO_WR             0x054
 #define SIO_FIFO_RD             0x058
 #define SIO_SPINLOCK_ST         0x05c
+#define SIO_DIV_UDIVIDEND       0x060
+#define SIO_DIV_UDIVISOR        0x064
+#define SIO_DIV_SDIVIDEND       0x068
+#define SIO_DIV_SDIVISOR        0x06c
+#define SIO_DIV_QUOTIENT        0x070
+#define SIO_DIV_REMAINDER       0x074
+#define SIO_DIV_CSR             0x078
 #define SIO_SPINLOCK_BASE       0x100
 #define SIO_SPINLOCK_LAST       0x17c
 
@@ -44,6 +51,8 @@
 #define SIO_FIFO_ST_VLD         BIT(0)
 #define SIO_FIFO_ST_RDY         BIT(1)
 #define SIO_FIFO_ST_WC_MASK     (BIT(3) | BIT(2))
+#define SIO_DIV_CSR_READY       BIT(0)
+#define SIO_DIV_CSR_DIRTY       BIT(1)
 
 static unsigned rp2040_sio_current_core(void)
 {
@@ -126,6 +135,60 @@ static bool rp2040_sio_spinlock_offset(hwaddr offset, unsigned *index)
     return *index < 32;
 }
 
+static int32_t rp2040_sio_sign32(uint32_t value)
+{
+    int32_t signed_value = (int32_t)value;
+
+    if (signed_value > 0) {
+        return 1;
+    }
+    if (signed_value < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static void rp2040_sio_divide(RP2040SioState *s, unsigned core,
+                              bool is_signed)
+{
+    uint32_t dividend = s->div_dividend[core];
+    uint32_t divisor = s->div_divisor[core];
+    uint32_t quotient;
+    uint32_t remainder;
+
+    if (is_signed) {
+        int32_t signed_dividend = (int32_t)dividend;
+        int32_t signed_divisor = (int32_t)divisor;
+
+        if (signed_divisor == 0) {
+            quotient = -rp2040_sio_sign32(dividend);
+            remainder = dividend;
+        } else if (signed_dividend == INT32_MIN && signed_divisor == -1) {
+            quotient = dividend;
+            remainder = 0;
+        } else {
+            quotient = signed_dividend / signed_divisor;
+            remainder = signed_dividend % signed_divisor;
+        }
+    } else if (divisor == 0) {
+        quotient = UINT32_MAX;
+        remainder = dividend;
+    } else {
+        quotient = dividend / divisor;
+        remainder = dividend % divisor;
+    }
+
+    s->div_quotient[core] = quotient;
+    s->div_remainder[core] = remainder;
+    s->div_dirty[core] = true;
+}
+
+static uint32_t rp2040_sio_div_csr(RP2040SioState *s, unsigned core)
+{
+    return SIO_DIV_CSR_READY |
+           (s->div_dirty[core] ? SIO_DIV_CSR_DIRTY : 0);
+}
+
 static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
 {
     RP2040SioState *s = opaque;
@@ -164,20 +227,38 @@ static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
     case SIO_SPINLOCK_ST:
         value = s->spinlock_st;
         break;
+    case SIO_DIV_UDIVIDEND:
+    case SIO_DIV_SDIVIDEND:
+        value = s->div_dividend[core];
+        break;
+    case SIO_DIV_UDIVISOR:
+    case SIO_DIV_SDIVISOR:
+        value = s->div_divisor[core];
+        break;
+    case SIO_DIV_QUOTIENT:
+        value = s->div_quotient[core];
+        s->div_dirty[core] = false;
+        break;
+    case SIO_DIV_REMAINDER:
+        value = s->div_remainder[core];
+        break;
+    case SIO_DIV_CSR:
+        value = rp2040_sio_div_csr(s, core);
+        break;
     default:
         if (rp2040_sio_spinlock_offset(addr, &index)) {
             value = (s->spinlock_st & BIT(index)) ? 0 : BIT(index);
             s->spinlock_st |= BIT(index);
         } else {
             value = 0;
+            qemu_log_mask(LOG_UNIMP, "rp2040.sio: unimplemented read  "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx ")\n",
+                          size, RP2040_SIO_BASE + addr, addr);
         }
         break;
     }
 
-    qemu_log_mask(LOG_UNIMP, "rp2040.sio: read  "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                  size, RP2040_SIO_BASE + addr, addr, size << 1, value);
     return value;
 }
 
@@ -244,18 +325,43 @@ static void rp2040_sio_write(void *opaque, hwaddr addr,
     case SIO_FIFO_WR:
         rp2040_sio_fifo_push(s, core, value);
         break;
+    case SIO_DIV_UDIVIDEND:
+        s->div_dividend[core] = value;
+        rp2040_sio_divide(s, core, false);
+        break;
+    case SIO_DIV_UDIVISOR:
+        s->div_divisor[core] = value;
+        rp2040_sio_divide(s, core, false);
+        break;
+    case SIO_DIV_SDIVIDEND:
+        s->div_dividend[core] = value;
+        rp2040_sio_divide(s, core, true);
+        break;
+    case SIO_DIV_SDIVISOR:
+        s->div_divisor[core] = value;
+        rp2040_sio_divide(s, core, true);
+        break;
+    case SIO_DIV_QUOTIENT:
+        s->div_quotient[core] = value;
+        s->div_dirty[core] = true;
+        break;
+    case SIO_DIV_REMAINDER:
+        s->div_remainder[core] = value;
+        s->div_dirty[core] = true;
+        break;
     default:
         if (rp2040_sio_spinlock_offset(addr, &index)) {
             s->spinlock_st &= ~BIT(index);
+        } else {
+            qemu_log_mask(LOG_UNIMP, "rp2040.sio: unimplemented write "
+                          "(size %d, addr 0x%08" HWADDR_PRIx
+                          ", offset 0x%04" HWADDR_PRIx
+                          ", value 0x%0*" PRIx64 ")\n",
+                          size, RP2040_SIO_BASE + addr, addr,
+                          size << 1, value64);
         }
         break;
     }
-
-    qemu_log_mask(LOG_UNIMP, "rp2040.sio: write "
-                  "(size %d, addr 0x%08" HWADDR_PRIx
-                  ", offset 0x%04" HWADDR_PRIx
-                  ", value 0x%0*" PRIx64 ")\n",
-                  size, RP2040_SIO_BASE + addr, addr, size << 1, value64);
 }
 
 static const MemoryRegionOps rp2040_sio_ops = {
@@ -283,6 +389,11 @@ static void rp2040_sio_reset(DeviceState *dev)
     memset(s->fifo_wptr, 0, sizeof(s->fifo_wptr));
     memset(s->fifo_level, 0, sizeof(s->fifo_level));
     memset(s->fifo_sticky, 0, sizeof(s->fifo_sticky));
+    memset(s->div_dividend, 0, sizeof(s->div_dividend));
+    memset(s->div_divisor, 0, sizeof(s->div_divisor));
+    memset(s->div_quotient, 0, sizeof(s->div_quotient));
+    memset(s->div_remainder, 0, sizeof(s->div_remainder));
+    memset(s->div_dirty, 0, sizeof(s->div_dirty));
     s->spinlock_st = 0;
     rp2040_sio_update_fifo_irq(s);
 }
@@ -319,6 +430,16 @@ static const VMStateDescription vmstate_rp2040_sio = {
                             RP2040_SIO_NUM_CORES),
         VMSTATE_UINT32_ARRAY(fifo_sticky, RP2040SioState,
                              RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT32_ARRAY(div_dividend, RP2040SioState,
+                             RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT32_ARRAY(div_divisor, RP2040SioState,
+                             RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT32_ARRAY(div_quotient, RP2040SioState,
+                             RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT32_ARRAY(div_remainder, RP2040SioState,
+                             RP2040_SIO_NUM_CORES),
+        VMSTATE_BOOL_ARRAY(div_dirty, RP2040SioState,
+                           RP2040_SIO_NUM_CORES),
         VMSTATE_UINT32(spinlock_st, RP2040SioState),
         VMSTATE_END_OF_LIST()
     }
