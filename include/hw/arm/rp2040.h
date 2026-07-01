@@ -16,6 +16,7 @@
 #include "hw/core/sysbus.h"
 #include "hw/dma/rp2040_dma.h"
 #include "hw/misc/rp2040_clocks.h"
+#include "hw/misc/rp2040_iobank0.h"
 #include "hw/misc/rp2040_ioqspi.h"
 #include "hw/misc/rp2040_pads.h"
 #include "hw/misc/rp2040_pll.h"
@@ -51,6 +52,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040State, RP2040)
 #define RP2040_USBCTRL_REGS_SIZE  0x4000
 #define RP2040_SYNTHETIC_ROM_DBG_BASE 0x5fff0000
 #define RP2040_SYNTHETIC_ROM_DBG_SIZE 0x1000
+#define RP2040_SYNTHETIC_ROM_FLASH_HELPER_COUNT 6
 #define RP2040_NUM_CORES          2
 #define RP2040_NUM_IRQS           32
 
@@ -61,6 +63,7 @@ struct RP2040State {
     PL011State uart0;
     RP2040ClocksState clocks;
     RP2040DmaState dma;
+    RP2040IoBank0State iobank0;
     RP2040IoQspiState ioqspi;
     RP2040PadsBank0State pads_bank0;
     RP2040PadsQspiState pads_qspi;
@@ -97,8 +100,13 @@ struct RP2040State {
     qemu_irq nmi_irq[RP2040_NUM_CORES];
     bool irq_level[RP2040_NUM_CORES][RP2040_NUM_IRQS];
     bool mempowerdown_ready;
+    bool strict_uart_pins;
+    bool uart0_tx_pin_enabled;
+    bool uart0_rx_pin_enabled;
     uint32_t synthetic_rom_dbg_arg[4];
     uint32_t synthetic_rom_dbg_result[4];
+    uint32_t synthetic_rom_flash_helper_count[
+        RP2040_SYNTHETIC_ROM_FLASH_HELPER_COUNT];
 
     Clock *sysclk;
 };

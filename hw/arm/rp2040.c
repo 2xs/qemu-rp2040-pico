@@ -20,6 +20,7 @@
 #include "qemu/log.h"
 #include "target/arm/cpu.h"
 #include "target/arm/cpu-qom.h"
+#include "trace.h"
 
 #include <math.h>
 
@@ -27,6 +28,7 @@
 #define RP2040_UART0_IRQ  20
 #define RP2040_DMA_IRQ_0  11
 #define RP2040_DMA_IRQ_1  12
+#define RP2040_IO_IRQ_BANK0 13
 #define RP2040_SIO_IRQ_PROC0 15
 #define RP2040_SIO_IRQ_PROC1 16
 #define RP2040_PROC1       1
@@ -65,10 +67,20 @@
 #define RP2040_SYNTHETIC_ROM_DBG_RESULT1 0x18
 #define RP2040_SYNTHETIC_ROM_DBG_RESULT2 0x1c
 #define RP2040_SYNTHETIC_ROM_DBG_RESULT3 0x20
+#define RP2040_SYNTHETIC_ROM_DBG_FLASH_COUNT0 0x40
 
 #define RP2040_SYNTHETIC_FP_CMD_MASK   0xffffff00
 #define RP2040_SYNTHETIC_FP_CMD_FLOAT  0x80000000
 #define RP2040_SYNTHETIC_FP_CMD_DOUBLE 0x80000100
+
+enum RP2040SyntheticFlashHelper {
+    RP2040_SYNTHETIC_FLASH_CONNECT_INTERNAL_FLASH,
+    RP2040_SYNTHETIC_FLASH_EXIT_XIP,
+    RP2040_SYNTHETIC_FLASH_FLUSH_CACHE,
+    RP2040_SYNTHETIC_FLASH_ENTER_CMD_XIP,
+    RP2040_SYNTHETIC_FLASH_RANGE_ERASE,
+    RP2040_SYNTHETIC_FLASH_RANGE_PROGRAM,
+};
 
 #define RP2040_SF_TABLE_FADD            0x00
 #define RP2040_SF_TABLE_FSUB            0x04
@@ -241,7 +253,6 @@ static const struct {
     hwaddr base;
     hwaddr size;
 } rp2040_unimplemented[] = {
-    { "rp2040.iobank0",  0x40014000, 0x4000 },
     { "rp2040.busctrl",  0x40030000, 0x4000 },
     { "rp2040.uart1",    0x40038000, 0x4000 },
     { "rp2040.spi0",     0x4003c000, 0x4000 },
@@ -1291,6 +1302,18 @@ static bool rp2040_synthetic_fp_op(RP2040State *s, uint32_t command)
     }
 }
 
+static void rp2040_synthetic_flash_helper_hit(RP2040State *s,
+                                              unsigned int helper,
+                                              const char *name)
+{
+    uint32_t count;
+
+    g_assert(helper < RP2040_SYNTHETIC_ROM_FLASH_HELPER_COUNT);
+
+    count = ++s->synthetic_rom_flash_helper_count[helper];
+    trace_rp2040_synthetic_flash_helper(name, count);
+}
+
 static void rp2040_synthetic_rom_dbg_write(void *opaque, hwaddr addr,
                                            uint64_t value, unsigned size)
 {
@@ -1325,22 +1348,34 @@ static void rp2040_synthetic_rom_dbg_write(void *opaque, hwaddr addr,
 
     switch (code) {
     case RP2040_ROM_TABLE_CODE('C', 'X'):
+        rp2040_synthetic_flash_helper_hit(
+            s, RP2040_SYNTHETIC_FLASH_ENTER_CMD_XIP,
+            "flash_enter_cmd_xip");
         rp2040_log_nyi("bootrom", "flash_enter_cmd_xip",
                        "synthetic helper does not reconfigure SSI hardware");
         return;
     case RP2040_ROM_TABLE_CODE('E', 'X'):
+        rp2040_synthetic_flash_helper_hit(
+            s, RP2040_SYNTHETIC_FLASH_EXIT_XIP, "flash_exit_xip");
         rp2040_log_nyi("bootrom", "flash_exit_xip",
                        "synthetic helper does not send serial flash commands");
         return;
     case RP2040_ROM_TABLE_CODE('F', 'C'):
+        rp2040_synthetic_flash_helper_hit(
+            s, RP2040_SYNTHETIC_FLASH_FLUSH_CACHE, "flash_flush_cache");
         rp2040_log_nyi("bootrom", "flash_flush_cache",
                        "XIP cache is not modeled");
         return;
     case RP2040_ROM_TABLE_CODE('I', 'F'):
+        rp2040_synthetic_flash_helper_hit(
+            s, RP2040_SYNTHETIC_FLASH_CONNECT_INTERNAL_FLASH,
+            "connect_internal_flash");
         rp2040_log_nyi("bootrom", "connect_internal_flash",
                        "synthetic helper assumes the QSPI flash is connected");
         return;
     case RP2040_ROM_TABLE_CODE('R', 'E'):
+        rp2040_synthetic_flash_helper_hit(
+            s, RP2040_SYNTHETIC_FLASH_RANGE_ERASE, "flash_range_erase");
         if (!rp2040_xip_flash_range_erase(&s->xip,
                                           s->synthetic_rom_dbg_arg[0],
                                           s->synthetic_rom_dbg_arg[1],
@@ -1351,6 +1386,8 @@ static void rp2040_synthetic_rom_dbg_write(void *opaque, hwaddr addr,
         }
         return;
     case RP2040_ROM_TABLE_CODE('R', 'P'):
+        rp2040_synthetic_flash_helper_hit(
+            s, RP2040_SYNTHETIC_FLASH_RANGE_PROGRAM, "flash_range_program");
         if (!rp2040_xip_flash_range_program(&s->xip,
                                             s->synthetic_rom_dbg_arg[0],
                                             s->synthetic_rom_dbg_arg[1],
@@ -1390,6 +1427,14 @@ static uint64_t rp2040_synthetic_rom_dbg_read(void *opaque, hwaddr addr,
                                             RP2040_SYNTHETIC_ROM_DBG_RESULT0) /
                                            sizeof(uint32_t)];
     }
+    if (offset >= RP2040_SYNTHETIC_ROM_DBG_FLASH_COUNT0 &&
+        offset < RP2040_SYNTHETIC_ROM_DBG_FLASH_COUNT0 +
+                 sizeof(s->synthetic_rom_flash_helper_count) &&
+        QEMU_IS_ALIGNED(offset, sizeof(uint32_t))) {
+        return s->synthetic_rom_flash_helper_count[
+            (offset - RP2040_SYNTHETIC_ROM_DBG_FLASH_COUNT0) /
+            sizeof(uint32_t)];
+    }
 
     rp2040_log_nyi("bootrom", "synthetic diagnostic register read",
                    "unsupported register");
@@ -1413,6 +1458,34 @@ static void rp2040_set_irq(void *opaque, int irq, int level)
     assert(irq >= 0 && irq < RP2040_NUM_IRQS);
     s->irq_level[0][irq] = level;
     rp2040_update_nmi(s);
+}
+
+static void rp2040_update_uart_pins(RP2040State *s)
+{
+    pl011_set_tx_connected(&s->uart0,
+                           !s->strict_uart_pins ||
+                           s->uart0_tx_pin_enabled);
+    pl011_set_rx_connected(&s->uart0,
+                           !s->strict_uart_pins ||
+                           s->uart0_rx_pin_enabled);
+}
+
+static void rp2040_set_uart_pin(void *opaque, int pin, int level)
+{
+    RP2040State *s = opaque;
+
+    switch (pin) {
+    case 0:
+        s->uart0_tx_pin_enabled = level;
+        break;
+    case 1:
+        s->uart0_rx_pin_enabled = level;
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    rp2040_update_uart_pins(s);
 }
 
 static uint64_t rp2040_usbctrl_regs_read(void *opaque, hwaddr addr,
@@ -1508,6 +1581,8 @@ static void rp2040_soc_init(Object *obj)
     object_initialize_child(obj, "xip", &s->xip, TYPE_RP2040_XIP);
     object_initialize_child(obj, "clocks", &s->clocks, TYPE_RP2040_CLOCKS);
     object_initialize_child(obj, "dma", &s->dma, TYPE_RP2040_DMA);
+    object_initialize_child(obj, "iobank0", &s->iobank0,
+                            TYPE_RP2040_IOBANK0);
     object_initialize_child(obj, "ioqspi", &s->ioqspi, TYPE_RP2040_IOQSPI);
     object_initialize_child(obj, "pads-bank0", &s->pads_bank0,
                             TYPE_RP2040_PADS_BANK0);
@@ -1619,6 +1694,17 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->dma), 0, RP2040_DMA_BASE);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 0, s->irq[RP2040_DMA_IRQ_0]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 1, s->irq[RP2040_DMA_IRQ_1]);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->iobank0), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->iobank0), 0, RP2040_IOBANK0_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->iobank0), 0,
+                       s->irq[RP2040_IO_IRQ_BANK0]);
+    qdev_connect_gpio_out_named(DEVICE(&s->iobank0), "uart0-pin", 0,
+                                qemu_allocate_irq(rp2040_set_uart_pin, s, 0));
+    qdev_connect_gpio_out_named(DEVICE(&s->iobank0), "uart0-pin", 1,
+                                qemu_allocate_irq(rp2040_set_uart_pin, s, 1));
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ioqspi), errp)) {
         return;
@@ -1819,6 +1905,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
                                                "NMI", 0);
     }
     rp2040_update_nmi(s);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->iobank0), 1,
+                       s->cpu_irq[RP2040_PROC1][RP2040_IO_IRQ_BANK0]);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->sio), 1,
                        s->cpu_irq[RP2040_PROC1][RP2040_SIO_IRQ_PROC1]);
 
@@ -1827,6 +1915,7 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->uart0), errp)) {
         return;
     }
+    rp2040_update_uart_pins(s);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart0), 0, RP2040_UART0_BASE);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart0), 0, s->irq[RP2040_UART0_IRQ]);
 }
@@ -1835,6 +1924,7 @@ static const Property rp2040_soc_properties[] = {
     DEFINE_PROP_LINK("memory", RP2040State, board_memory, TYPE_MEMORY_REGION,
                      MemoryRegion *),
     DEFINE_PROP_STRING("bootrom-file", RP2040State, bootrom_file),
+    DEFINE_PROP_BOOL("strict-uart-pins", RP2040State, strict_uart_pins, true),
 };
 
 static void rp2040_soc_class_init(ObjectClass *klass, const void *data)

@@ -254,7 +254,13 @@ static void pl011_write_txdata(PL011State *s, uint8_t data)
      * XXX this blocks entire thread. Rewrite to use
      * qemu_chr_fe_write and background I/O callbacks
      */
-    qemu_chr_fe_write_all(&s->chr, &data, 1);
+    if (s->tx_connected) {
+        qemu_chr_fe_write_all(&s->chr, &data, 1);
+    } else if (!s->logged_disconnected_tx) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "PL011 data written while TX pin is disconnected\n");
+        s->logged_disconnected_tx = true;
+    }
     pl011_loopback_tx(s, data);
     s->int_level |= INT_TX;
     pl011_update(s);
@@ -518,6 +524,9 @@ static int pl011_can_receive(void *opaque)
      * historically never enforced that. So we effectively keep the
      * UART continuously enabled regardless of the enable bits.
      */
+    if (!s->rx_connected) {
+        return 0;
+    }
 
     trace_pl011_can_receive(s->lcr, s->read_count, fifo_depth, fifo_available);
     return fifo_available;
@@ -526,6 +535,9 @@ static int pl011_can_receive(void *opaque)
 static void pl011_receive(void *opaque, const uint8_t *buf, int size)
 {
     trace_pl011_receive(size);
+    if (!PL011(opaque)->rx_connected) {
+        return;
+    }
     /*
      * In loopback mode, the RX input signal is internally disconnected
      * from the entire receiving logics; thus, all inputs are ignored,
@@ -542,9 +554,26 @@ static void pl011_receive(void *opaque, const uint8_t *buf, int size)
 
 static void pl011_event(void *opaque, QEMUChrEvent event)
 {
-    if (event == CHR_EVENT_BREAK && !pl011_loopback_enabled(opaque)) {
+    PL011State *s = opaque;
+
+    if (event == CHR_EVENT_BREAK && s->rx_connected &&
+        !pl011_loopback_enabled(opaque)) {
         pl011_fifo_rx_put(opaque, DR_BE);
     }
+}
+
+void pl011_set_tx_connected(PL011State *s, bool connected)
+{
+    s->tx_connected = connected;
+    if (connected) {
+        s->logged_disconnected_tx = false;
+    }
+}
+
+void pl011_set_rx_connected(PL011State *s, bool connected)
+{
+    s->rx_connected = connected;
+    qemu_chr_fe_accept_input(&s->chr);
 }
 
 static void pl011_clock_update(void *opaque, ClockEvent event)
@@ -648,6 +677,8 @@ static void pl011_init(Object *obj)
     PL011State *s = PL011(obj);
     int i;
 
+    s->tx_connected = true;
+    s->rx_connected = true;
     memory_region_init_io(&s->iomem, OBJECT(s), &pl011_ops, s, "pl011", 0x1000);
     sysbus_init_mmio(sbd, &s->iomem);
     for (i = 0; i < ARRAY_SIZE(s->irq); i++) {

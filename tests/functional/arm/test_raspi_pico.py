@@ -17,6 +17,10 @@ class RaspiPicoMachine(QemuSystemTest):
     UF2_FLAG_FAMILY_ID_PRESENT = 0x00002000
     RP2040_FAMILY_ID = 0xE48BFF56
 
+    def set_direct_uart_machine(self):
+        self.set_machine('raspi-pico')
+        self.vm.set_machine('raspi-pico,strict-uart-pins=off')
+
     # Minimal Cortex-M0+ raw image linked for XIP at 0x10000000. It contains a
     # vector table and writes "PICO UART OK\n" to UART0 at 0x40034000.
     UART_TEST_BIN = bytes([
@@ -616,7 +620,7 @@ class RaspiPicoMachine(QemuSystemTest):
     ])
 
     def test_uart0(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('uart-test.bin')
         with open(image, 'wb') as image_file:
@@ -629,7 +633,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'PICO UART OK')
 
     def test_uart0_elf(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('uart-test.elf')
         with open(image, 'wb') as image_file:
@@ -642,7 +646,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'PICO UART OK')
 
     def test_uart0_elf_with_empty_sram_load_segment(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('uart-test-empty-sram.elf')
         with open(image, 'wb') as image_file:
@@ -656,7 +660,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'PICO UART OK')
 
     def test_timer_alarm_irq(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('timer-alarm-test.bin')
         with open(image, 'wb') as image_file:
@@ -670,7 +674,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'TIMER OK')
 
     def test_sio_fifo_core0_status(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('sio-fifo-test.bin')
         with open(image, 'wb') as image_file:
@@ -684,7 +688,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'SIO CORE0 OK')
 
     def test_sio_divider(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('sio-divider-test.bin')
         with open(image, 'wb') as image_file:
@@ -698,7 +702,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'SIO DIV OK')
 
     def test_psm_proc1_force_off(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('psm-proc1-test.bin')
         with open(image, 'wb') as image_file:
@@ -712,7 +716,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'PSM OK')
 
     def test_core1_rom_launch_ack(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('core1-working-test.bin')
         with open(image, 'wb') as image_file:
@@ -726,7 +730,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'core 0 and core 1 working !')
 
     def test_synthetic_bootrom_helpers(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('bootrom-helpers-test.bin')
         with open(image, 'wb') as image_file:
@@ -740,7 +744,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'BOOTROM HELPERS OK')
 
     def test_synthetic_bootrom_float_helpers(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('bootrom-float-test.bin')
         with open(image, 'wb') as image_file:
@@ -754,7 +758,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'BOOTROM FLOAT OK')
 
     def test_dma_copy_and_fill(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('dma-test.bin')
         with open(image, 'wb') as image_file:
@@ -771,8 +775,9 @@ class RaspiPicoMachine(QemuSystemTest):
         with open(flash, 'wb') as flash_file:
             flash_file.write(self.make_bootable_image(self.UART_TEST_BIN))
 
-        self.set_machine('raspi-pico')
-        self.vm.set_machine(f'raspi-pico,flash-file={flash}')
+        self.set_direct_uart_machine()
+        self.vm.set_machine(
+            f'raspi-pico,strict-uart-pins=off,flash-file={flash}')
         self.vm.set_console()
         self.vm.launch()
 
@@ -784,7 +789,7 @@ class RaspiPicoMachine(QemuSystemTest):
         with open(uf2, 'wb') as uf2_file:
             uf2_file.write(self.make_bootable_uart_uf2())
 
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
         self.vm.set_console()
         self.vm.add_args('-kernel', uf2)
         self.vm.launch()
@@ -800,8 +805,9 @@ class RaspiPicoMachine(QemuSystemTest):
         with open(flash, 'wb') as flash_file:
             flash_file.write(bytes([0xff]) * 512)
 
-        self.set_machine('raspi-pico')
-        self.vm.set_machine(f'raspi-pico,flash-file={flash}')
+        self.set_direct_uart_machine()
+        self.vm.set_machine(
+            f'raspi-pico,strict-uart-pins=off,flash-file={flash}')
         self.vm.set_console()
         self.vm.add_args('-kernel', uf2)
         self.vm.launch()
@@ -809,7 +815,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'PICO UART OK')
 
     def test_flash_program(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('flash-program.bin')
         with open(image, 'wb') as image_file:
@@ -825,7 +831,7 @@ class RaspiPicoMachine(QemuSystemTest):
                           extra_args=()):
         vm = self.get_vm(name=name)
 
-        vm.set_machine(f'raspi-pico,flash-file={flash}')
+        vm.set_machine(f'raspi-pico,strict-uart-pins=off,flash-file={flash}')
         vm.set_console()
         vm.add_args(*extra_args)
         if kernel:
@@ -843,7 +849,7 @@ class RaspiPicoMachine(QemuSystemTest):
         with open(flash, 'wb') as flash_file:
             flash_file.write(bytes([0xff]) * 512)
 
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
         self.launch_flash_file('overlay-write', flash, 'PICO UART OK', uf2)
         self.launch_flash_file('overlay-read', flash, 'PICO UART OK')
 
@@ -853,7 +859,7 @@ class RaspiPicoMachine(QemuSystemTest):
         with open(uf2, 'wb') as uf2_file:
             uf2_file.write(self.make_bootable_uart_uf2())
 
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
         self.vm.set_console()
         self.vm.add_args('-bios', 'pipico.rom', '-kernel', uf2)
         self.vm.launch()
@@ -866,7 +872,7 @@ class RaspiPicoMachine(QemuSystemTest):
         with open(elf, 'wb') as elf_file:
             elf_file.write(self.make_bootable_uart_elf())
 
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
         self.vm.set_console()
         self.vm.add_args('-bios', 'pipico.rom', '-kernel', elf)
         self.vm.launch()
@@ -882,7 +888,7 @@ class RaspiPicoMachine(QemuSystemTest):
         with open(flash, 'wb') as flash_file:
             flash_file.write(bytes([0xff]) * 512)
 
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
         self.launch_flash_file('bootrom-overlay-write', flash,
                                'PICO UART OK', uf2,
                                extra_args=('-bios', 'pipico.rom'))
@@ -903,12 +909,12 @@ class RaspiPicoMachine(QemuSystemTest):
             image_file.write(self.make_bootable_image(
                 self.FLASH_PERSIST_READER_BIN))
 
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
         self.launch_flash_file('guest-write', flash, 'FLASH OK', program)
         self.launch_flash_file('guest-read', flash, 'PERSIST OK', reader)
 
     def test_flash_program_without_write_enable(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('flash-no-wel.bin')
         with open(image, 'wb') as image_file:
@@ -922,7 +928,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'NO WEL OK')
 
     def test_flash_program_old_and_new(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('flash-old-and-new.bin')
         with open(image, 'wb') as image_file:
@@ -936,7 +942,7 @@ class RaspiPicoMachine(QemuSystemTest):
         wait_for_console_pattern(self, 'OLD AND NEW OK')
 
     def test_flash_busy_xip_hardfault(self):
-        self.set_machine('raspi-pico')
+        self.set_direct_uart_machine()
 
         image = self.scratch_file('flash-hardfault.bin')
         with open(image, 'wb') as image_file:

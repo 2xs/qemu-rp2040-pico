@@ -275,6 +275,24 @@ forming part of the XIP block.  It can be configured to issue common serial
 flash read sequences, including the standard ``0x03`` read command with a
 24-bit address.  See datasheet pages 567 to 569.
 
+The synthetic boot ROM keeps the ROM, SDK and hardware responsibilities
+separate.  The SIO model provides inter-core FIFOs, FIFO IRQs and spinlocks;
+the Pico SDK implements higher-level protocols such as
+``multicore_lockout``; the boot ROM function table only provides the low
+level flash helper entry points.  QEMU exposes counters and trace events for
+synthetic calls to ``connect_internal_flash``, ``flash_exit_xip``,
+``flash_flush_cache``, ``flash_enter_cmd_xip``, ``flash_range_erase`` and
+``flash_range_program`` so SDK smoke tests can confirm which ROM helper path
+was used.
+
+For the synthetic ROM path, ``flash_range_erase`` and
+``flash_range_program`` update the QEMU XIP flash backing immediately.  This
+is an atomic compatibility service intended to validate SDK code paths
+without conflating them with XIP busy timing.  The lower-level SSI/XIP command
+path is still responsible for modelling serial flash command state and for
+raising the documented QEMU HardFault policy when guest code executes from
+XIP while the flash model is busy.
+
 For software-driven flash operations, firmware programs the SSI through its
 APB register interface at ``XIP_SSI_BASE``.  The important registers for the
 initial emulation are ``CTRLR0``, ``CTRLR1``, ``SSIENR``, ``SER``, ``BAUDR``,
@@ -336,11 +354,17 @@ RP2040 UART programmer's model: ``UARTDR`` is at offset ``0x000``,
 ``UARTRSR/UARTECR`` at ``0x004`` and ``UARTFR`` at ``0x018``.  See datasheet
 pages 429 to 431.
 
-The console path is currently connected directly to QEMU's serial backend.
-The RP2040 ``IO_BANK0`` GPIO function mux is not yet modeled, so programming
-GPIO0/GPIO1 ``FUNCSEL`` is not required to make UART0 visible to the host.
-``PADS_BANK0`` stores the documented pad-control registers separately from
-this UART path.
+The console path uses QEMU's standard serial backends, so the host side can
+still be selected with the usual ``-serial`` or ``-chardev`` options.  By
+default, the Pico machine requires the guest to route UART0 through
+``IO_BANK0`` first: GPIO0 must have ``FUNCSEL=UART`` before UART0 transmit
+data reaches the host serial backend, and GPIO1 must have ``FUNCSEL=UART``
+before host serial input reaches UART0 receive data.  This catches firmware
+that writes UART0 registers but forgets the Pico GPIO function select.
+
+For compatibility with very small bring-up payloads, this check can be
+disabled with ``-machine raspi-pico,strict-uart-pins=off``.  ``PADS_BANK0``
+stores the documented pad-control registers separately from this UART path.
 
 For the initial console use case, the documented stable status behaviour is:
 
@@ -364,9 +388,14 @@ Known limitations
    SDK-compatible FIFO launch sequence, installs the provided ``VTOR``/stack,
    and branches to the provided entry point.  When an external mask ROM is
    supplied, core 1 is kept powered off until that ROM path is modeled.
- * UART0 currently uses QEMU's PL011 model directly, with the RP2040
-   compatibility policy documented above.  The GPIO function mux that routes
-   pins to UART0 is not yet modeled.
+ * UART0 currently uses QEMU's PL011 model with the RP2040 compatibility
+   policy documented above.  The strict pin check currently covers the Pico
+   console pins GPIO0/GPIO1 only; alternate RP2040 UART0 pin mappings remain
+   future work.
+ * ``IO_BANK0`` stores GPIO function-select, override and interrupt registers,
+   implements RP2040 atomic aliases, and gates UART0 host serial I/O for the
+   GPIO0/GPIO1 console path.  It does not yet route other SIO/peripheral
+   signal paths, and it does not model pad input levels or edge detection.
  * ``PADS_BANK0`` and ``PADS_QSPI`` store documented pad-control registers and
    implement RP2040 atomic aliases.  They do not model electrical pad
    behaviour and do not currently gate UART or XIP operation.
