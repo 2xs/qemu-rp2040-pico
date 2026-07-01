@@ -11,8 +11,10 @@
 #include "exec/memattrs.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/loader.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/ssi/rp2040_xip.h"
 #include "qemu/log.h"
+#include "system/address-spaces.h"
 
 #define RP2040_XIP_CTRL_EN           0x1
 #define RP2040_XIP_CTRL_ERR_BADWRITE 0x2
@@ -143,6 +145,7 @@ static void rp2040_xip_finish_busy(RP2040XipState *s)
 static void rp2040_xip_reset_tx(RP2040XipState *s)
 {
     s->tx_len = 0;
+    s->tx_unsupported_logged = false;
 }
 
 static bool rp2040_xip_writeback(RP2040XipState *s, Error **errp)
@@ -360,6 +363,13 @@ static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
          * while probing the flash path. Even for commands we do not model yet,
          * a transmitted byte clocks one receive byte back from the bus.
          */
+        if (!s->tx_unsupported_logged) {
+            g_autofree char *detail = g_strdup_printf("opcode 0x%02x",
+                                                      s->tx[0]);
+
+            rp2040_log_nyi("xip.ssi", "flash command", detail);
+            s->tx_unsupported_logged = true;
+        }
         rp2040_xip_rx_push(s, 0);
         break;
     }
@@ -870,6 +880,68 @@ void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
         return;
     }
     rp2040_xip_writeback(s, errp);
+}
+
+bool rp2040_xip_flash_range_erase(RP2040XipState *s, uint32_t flash_offs,
+                                  uint32_t count, uint32_t block_size,
+                                  uint8_t block_cmd, Error **errp)
+{
+    if (!QEMU_IS_ALIGNED(flash_offs, FLASH_SECTOR_SIZE) ||
+        !QEMU_IS_ALIGNED(count, FLASH_SECTOR_SIZE)) {
+        error_setg(errp, "flash erase range is not sector-aligned");
+        return false;
+    }
+    if (flash_offs > s->flash_size || count > s->flash_size - flash_offs) {
+        error_setg(errp, "flash erase range is outside XIP storage");
+        return false;
+    }
+    if (block_size && block_size != 64 * KiB) {
+        g_autofree char *detail = g_strdup_printf("block size %" PRIu32,
+                                                  block_size);
+
+        rp2040_log_nyi("bootrom", "flash_range_erase block size", detail);
+    }
+    if (block_cmd != 0x20 && block_cmd != 0xd8) {
+        g_autofree char *detail = g_strdup_printf("erase command 0x%02x",
+                                                  block_cmd);
+
+        rp2040_log_nyi("bootrom", "flash_range_erase command", detail);
+    }
+
+    memset(s->storage + flash_offs, 0xff, count);
+    return rp2040_xip_writeback(s, errp);
+}
+
+bool rp2040_xip_flash_range_program(RP2040XipState *s, uint32_t flash_offs,
+                                    uint32_t data_addr, uint32_t count,
+                                    Error **errp)
+{
+    g_autofree uint8_t *buf = NULL;
+    uint32_t i;
+
+    if (!QEMU_IS_ALIGNED(flash_offs, FLASH_PAGE_SIZE) ||
+        !QEMU_IS_ALIGNED(count, FLASH_PAGE_SIZE)) {
+        error_setg(errp, "flash program range is not page-aligned");
+        return false;
+    }
+    if (flash_offs > s->flash_size || count > s->flash_size - flash_offs) {
+        error_setg(errp, "flash program range is outside XIP storage");
+        return false;
+    }
+
+    buf = g_malloc(count);
+    if (address_space_read(&address_space_memory, data_addr,
+                           MEMTXATTRS_UNSPECIFIED, buf, count) != MEMTX_OK) {
+        error_setg(errp, "could not read flash program buffer at 0x%08" PRIx32,
+                   data_addr);
+        return false;
+    }
+
+    for (i = 0; i < count; i++) {
+        s->storage[flash_offs + i] &= buf[i];
+    }
+
+    return rp2040_xip_writeback(s, errp);
 }
 
 static void rp2040_xip_realize(DeviceState *dev, Error **errp)
