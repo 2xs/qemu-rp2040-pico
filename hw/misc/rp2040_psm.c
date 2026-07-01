@@ -144,7 +144,7 @@ static void rp2040_psm_reset(DeviceState *dev)
     RP2040PsmState *s = RP2040_PSM(dev);
 
     s->frce_on = 0;
-    s->frce_off = RP2040_PSM_PROC1;
+    s->frce_off = 0;
     s->wdsel = 0;
     rp2040_psm_update(s);
 }

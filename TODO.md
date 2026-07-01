@@ -351,11 +351,12 @@ Current clock/reset bring-up note:
   timing, and pause/debug side effects remain minimal.
 - The SIO block now provides `CPUID`, user GPIO and QSPI `GPIO_HI`
   output/output-enable registers with set/clear/xor operations, 8-entry
-  inter-core FIFOs, FIFO `VLD`/`RDY`/`ROE`/`WOF` status, proc0 FIFO IRQ
-  output, and simple hardware spinlock claim/release semantics. Core1 is
-  instantiated and starts powered off; the proc1 FIFO IRQ output remains
-  intentionally unrouted until the SDK-compatible core1 wake path exists. The
-  divider, interpolators, and SDK core1 launch protocol remain future work.
+  inter-core FIFOs, FIFO `VLD`/`RDY`/`ROE`/`WOF` status, proc0/proc1 FIFO IRQ
+  outputs, and simple hardware spinlock claim/release semantics. With the
+  synthetic ROM, core1 starts at reset and waits in ROM for the SDK FIFO launch
+  sequence. With an external mask ROM, core1 remains powered off until the
+  faithful core1 ROM path is modeled. The divider and interpolators remain
+  future work.
 
 ## Phase 13: SIO Multicore Groundwork
 
@@ -375,8 +376,8 @@ Current multicore groundwork note:
 - SIO uses QEMU's `current_cpu` thread-local guest vCPU pointer to determine
   whether an MMIO access comes from proc0 or proc1. This is a QEMU guest CPU
   service, not the host machine CPU id.
-- The proc1 FIFO IRQ output is intentionally left unrouted until the proc1
-  wake/reset path exists.
+- Proc1 FIFO IRQ output is routed to proc1. Peripheral IRQ routing beyond SIO
+  is still mostly proc0-focused.
 
 ## Phase 14: Instantiate Cortex-M0+ Proc1
 
@@ -395,13 +396,18 @@ Current multicore groundwork note:
 - [x] Model the reset/power path used by Pico SDK `multicore_reset_core1()`,
   including the `PSM_FRCE_OFF_PROC1` behavior or an equivalent documented
   minimal shim.
-- [x] Support the Pico SDK FIFO launch sequence `{0, 0, 1, VTOR, SP, PC}`.
+- [x] Support the Pico SDK FIFO launch sequence `{0, 0, 1, VTOR, SP, PC}` in
+  the synthetic ROM, echoing the command words as the SDK expects.
 - [x] Start proc1 with the provided vector table, stack pointer, and entry
   point.
-- [x] Implement enough event/wakeup behavior for the SDK `SEV`/`WFE` launch
-  loop to complete.
-- [x] Add a bare-metal functional test where proc0 launches proc1 and receives
-  an acknowledgement through SIO FIFO.
+- [x] Implement enough launch behavior for the SDK-style FIFO handshake to
+  complete once core1 is already waiting in synthetic ROM.
+- [x] Add a bare-metal functional test where proc0 sends the SDK launch
+  sequence, receives echoes from proc1 through SIO FIFO, and then receives a
+  post-jump `0xd01e` acknowledgement from code running on proc1's supplied
+  stack.
+- [x] Extend the synthetic ROM core1 path to jump to the provided `VTOR`,
+  stack pointer and entry point after the sequence is validated.
 - [ ] Add a Pico SDK multicore hello-world test once the SDK fixture is stable.
 - [ ] Document remaining limitations: timing, lockout behavior, flash-write
   lockout interactions, divider/interpolator coverage, and reset fidelity.

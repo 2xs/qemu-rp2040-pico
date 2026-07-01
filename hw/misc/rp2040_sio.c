@@ -82,18 +82,8 @@ static uint32_t rp2040_sio_fifo_status(RP2040SioState *s, unsigned core)
     return value;
 }
 
-static uint32_t rp2040_sio_fifo_pop(RP2040SioState *s, unsigned core);
-
-void rp2040_sio_set_fifo_write_callback(RP2040SioState *s,
-                                        RP2040SioFifoWriteFn fifo_write,
-                                        void *opaque)
-{
-    s->fifo_write = fifo_write;
-    s->fifo_write_opaque = opaque;
-}
-
-void rp2040_sio_fifo_push_from_core(RP2040SioState *s, unsigned core,
-                                    uint32_t value)
+static void rp2040_sio_fifo_push(RP2040SioState *s, unsigned core,
+                                 uint32_t value)
 {
     unsigned peer = core ^ 1;
 
@@ -106,21 +96,6 @@ void rp2040_sio_fifo_push_from_core(RP2040SioState *s, unsigned core,
     s->fifo_wptr[peer] = (s->fifo_wptr[peer] + 1) % RP2040_SIO_FIFO_DEPTH;
     s->fifo_level[peer]++;
     rp2040_sio_update_fifo_irq(s);
-
-    if (s->fifo_write) {
-        s->fifo_write(s->fifo_write_opaque, core, value);
-    }
-}
-
-void rp2040_sio_fifo_drain_core(RP2040SioState *s, unsigned core)
-{
-    if (core >= RP2040_SIO_NUM_CORES) {
-        return;
-    }
-
-    while (s->fifo_level[core] != 0) {
-        (void)rp2040_sio_fifo_pop(s, core);
-    }
 }
 
 static uint32_t rp2040_sio_fifo_pop(RP2040SioState *s, unsigned core)
@@ -267,7 +242,7 @@ static void rp2040_sio_write(void *opaque, hwaddr addr,
         s->fifo_sticky[core] &= ~(value & SIO_FIFO_ST_WC_MASK);
         break;
     case SIO_FIFO_WR:
-        rp2040_sio_fifo_push_from_core(s, core, value);
+        rp2040_sio_fifo_push(s, core, value);
         break;
     default:
         if (rp2040_sio_spinlock_offset(addr, &index)) {

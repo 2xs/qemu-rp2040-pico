@@ -53,30 +53,37 @@
 #define ATOMIC_CLR        0x3000
 
 /*
- * Temporary boot ROM used until a faithful RP2040 boot ROM is requested.
- * It uses a fixed stack top, copies the 256-byte XIP second-stage boot code
- * into SRAM, then branches to the SRAM copy.  Real RP2040 mask ROM performs
- * more checks, but boot2 expects to run from SRAM while it configures XIP.
+ * Temporary boot ROM used until a faithful RP2040 boot ROM is requested.  It
+ * uses SIO_CPUID to split core behavior: core 0 copies the 256-byte XIP
+ * second-stage boot code into SRAM and branches to the SRAM copy; core 1 waits
+ * in ROM for the Pico SDK launch FIFO sequence, echoes the received words,
+ * installs VTOR/MSP, then branches to the received entry point.  Real RP2040
+ * mask ROM performs more checks, but boot2 expects to run from SRAM while it
+ * configures XIP.
  */
 static const uint8_t rp2040_bootrom[] = {
     0x00, 0x20, 0x04, 0x20, /* initial SP: 0x20042000 */
     0x41, 0x00, 0x00, 0x00, /* reset handler: 0x00000041 */
-    0x69, 0x00, 0x00, 0x00, /* NMI handler: 0x00000069 */
-    0x69, 0x00, 0x00, 0x00, /* HardFault handler: 0x00000069 */
-    0x69, 0x00, 0x00, 0x00, /* reserved */
-    0x69, 0x00, 0x00, 0x00, /* reserved */
-    0x69, 0x00, 0x00, 0x00, /* reserved */
+    0xb3, 0x00, 0x00, 0x00, /* NMI handler: 0x000000b3 */
+    0xb3, 0x00, 0x00, 0x00, /* HardFault handler: 0x000000b3 */
+    0xb3, 0x00, 0x00, 0x00, /* reserved */
+    0xb3, 0x00, 0x00, 0x00, /* reserved */
+    0xb3, 0x00, 0x00, 0x00, /* reserved */
     0x00, 0x00, 0x00, 0x00, /* reserved */
     0x00, 0x00, 0x00, 0x00, /* reserved */
     0x00, 0x00, 0x00, 0x00, /* reserved */
     0x00, 0x00, 0x00, 0x00, /* reserved */
-    0x69, 0x00, 0x00, 0x00, /* SVC handler: 0x00000069 */
+    0xb3, 0x00, 0x00, 0x00, /* SVC handler: 0x000000b3 */
     0x00, 0x00, 0x00, 0x00, /* reserved */
     0x00, 0x00, 0x00, 0x00, /* reserved */
-    0x69, 0x00, 0x00, 0x00, /* PendSV handler: 0x00000069 */
-    0x69, 0x00, 0x00, 0x00, /* SysTick handler: 0x00000069 */
-    0x0a, 0x48,             /* ldr r0, [pc, #40] ; 0x10000000 */
-    0x0b, 0x49,             /* ldr r1, [pc, #44] ; 0x20041f00 */
+    0xb3, 0x00, 0x00, 0x00, /* PendSV handler: 0x000000b3 */
+    0xb3, 0x00, 0x00, 0x00, /* SysTick handler: 0x000000b3 */
+    0x26, 0x4c,             /* ldr r4, [pc, #152] ; SIO_BASE */
+    0x20, 0x68,             /* ldr r0, [r4] ; SIO_CPUID */
+    0x00, 0x28,             /* cmp r0, #0 */
+    0x13, 0xd1,             /* bne core1 path */
+    0x25, 0x48,             /* ldr r0, [pc, #148] ; 0x10000000 */
+    0x26, 0x49,             /* ldr r1, [pc, #152] ; 0x20041f00 */
     0x40, 0x22,             /* movs r2, #64 */
     0x03, 0x68,             /* ldr r3, [r0] */
     0x0b, 0x60,             /* str r3, [r1] */
@@ -84,24 +91,71 @@ static const uint8_t rp2040_bootrom[] = {
     0x04, 0x31,             /* adds r1, #4 */
     0x01, 0x3a,             /* subs r2, #1 */
     0xf9, 0xd1,             /* bne copy loop */
-    0x09, 0x4b,             /* ldr r3, [pc, #36] ; launch entry */
+    0x23, 0x4b,             /* ldr r3, [pc, #140] ; launch entry */
     0x9e, 0x46,             /* mov lr, r3 */
-    0x07, 0x48,             /* ldr r0, [pc, #28] ; 0x20041f01 */
+    0x23, 0x48,             /* ldr r0, [pc, #140] ; 0x20041f01 */
     0x00, 0x47,             /* bx r0 */
-    0x08, 0x48,             /* ldr r0, [pc, #32] ; 0x10000100 */
-    0x08, 0x49,             /* ldr r1, [pc, #32] ; VTOR */
+    0x23, 0x48,             /* ldr r0, [pc, #140] ; 0x10000100 */
+    0x23, 0x49,             /* ldr r1, [pc, #140] ; VTOR */
     0x08, 0x60,             /* str r0, [r1] */
-    0x03, 0xc8,             /* ldm r0, {r0, r1} */
-    0x80, 0xf3, 0x08, 0x88, /* msr msp, r0 */
-    0x08, 0x47,             /* bx r1 */
-    0xfe, 0xe7,             /* b . */
-    0xc0, 0x46,             /* align */
+    0x06, 0xc8,             /* ldm r0!, {r1, r2} */
+    0x81, 0xf3, 0x08, 0x88, /* msr msp, r1 */
+    0x10, 0x47,             /* bx r2 */
+    0x21, 0x4d,             /* ldr r5, [pc, #132] ; sequence */
+    0x00, 0x26,             /* movs r6, #0 */
+    0x00, 0xf0, 0x1e, 0xf8, /* bl fifo_pop */
+    0x03, 0x2e,             /* cmp r6, #3 */
+    0x07, 0xd2,             /* bhs echo */
+    0xb1, 0x00,             /* lsls r1, r6, #2 */
+    0x6a, 0x58,             /* ldr r2, [r5, r1] */
+    0x90, 0x42,             /* cmp r0, r2 */
+    0x0c, 0xd0,             /* beq echo */
+    0x00, 0x26,             /* movs r6, #0 */
+    0x00, 0xf0, 0x1c, 0xf8, /* bl fifo_push */
+    0xf3, 0xe7,             /* b core1 loop */
+    0x03, 0x2e,             /* cmp r6, #3 */
+    0x01, 0xd1,             /* bne maybe SP */
+    0x07, 0x46,             /* mov r7, r0 */
+    0x04, 0xe0,             /* b echo */
+    0x04, 0x2e,             /* cmp r6, #4 */
+    0x01, 0xd1,             /* bne save PC */
+    0x03, 0x46,             /* mov r3, r0 */
+    0x00, 0xe0,             /* b echo */
+    0x05, 0x46,             /* mov r5, r0 */
+    0x00, 0xf0, 0x10, 0xf8, /* bl fifo_push */
+    0x01, 0x36,             /* adds r6, #1 */
+    0x06, 0x2e,             /* cmp r6, #6 */
+    0xe5, 0xd1,             /* bne core1 loop */
+    0x12, 0x49,             /* ldr r1, [pc, #72] ; VTOR */
+    0x0f, 0x60,             /* str r7, [r1] */
+    0x83, 0xf3, 0x08, 0x88, /* msr msp, r3 */
+    0x28, 0x47,             /* bx r5 */
+    0xfe, 0xe7,             /* hang */
+    0x09, 0x4c,             /* ldr r4, [pc, #36] ; SIO_BASE */
+    0x20, 0x6d,             /* ldr r0, [r4, #0x50] */
+    0x01, 0x21,             /* movs r1, #1 */
+    0x08, 0x42,             /* tst r0, r1 */
+    0xfb, 0xd0,             /* beq fifo_pop */
+    0xa0, 0x6d,             /* ldr r0, [r4, #0x58] */
+    0x70, 0x47,             /* bx lr */
+    0x06, 0x4c,             /* ldr r4, [pc, #24] ; SIO_BASE */
+    0x21, 0x6d,             /* ldr r1, [r4, #0x50] */
+    0x02, 0x22,             /* movs r2, #2 */
+    0x11, 0x42,             /* tst r1, r2 */
+    0xfb, 0xd0,             /* beq fifo_push */
+    0x60, 0x65,             /* str r0, [r4, #0x54] */
+    0x70, 0x47,             /* bx lr */
+    0x00, 0x00, 0x00, 0x00, /* core1 sequence[0] */
+    0x00, 0x00, 0x00, 0x00, /* core1 sequence[1] */
+    0x01, 0x00, 0x00, 0x00, /* core1 sequence[2] */
+    0x00, 0x00, 0x00, 0xd0, /* SIO_BASE */
     0x00, 0x00, 0x00, 0x10, /* boot2 source: 0x10000000 */
     0x00, 0x1f, 0x04, 0x20, /* boot2 SRAM copy: 0x20041f00 */
+    0x63, 0x00, 0x00, 0x00, /* post-boot2 launch entry: 0x00000063 */
     0x01, 0x1f, 0x04, 0x20, /* boot2 SRAM entry: 0x20041f01 */
-    0x5b, 0x00, 0x00, 0x00, /* post-boot2 launch entry: 0x0000005b */
     0x00, 0x01, 0x00, 0x10, /* application vectors: 0x10000100 */
     0x08, 0xed, 0x00, 0xe0, /* VTOR: 0xe000ed08 */
+    0xd0, 0x00, 0x00, 0x00, /* core1 sequence table */
 };
 
 static const struct {
@@ -212,44 +266,36 @@ static void rp2040_syscfg_update(void *opaque)
     rp2040_update_nmi(s);
 }
 
-typedef struct RP2040CoreLaunchInfo {
-    uint32_t vtor;
-    uint32_t sp;
-    uint32_t pc;
-} RP2040CoreLaunchInfo;
-
 static void rp2040_start_core1_async_work(CPUState *cs, run_on_cpu_data data)
 {
     ARMCPU *cpu = ARM_CPU(cs);
     CPUARMState *env = &cpu->env;
-    RP2040CoreLaunchInfo *info = data.host_ptr;
 
     cpu_reset(cs);
-    env->v7m.vecbase[M_REG_NS] = info->vtor & 0xffffff80;
-    env->v7m.vecbase[M_REG_S] = info->vtor & 0xffffff80;
-    env->regs[13] = info->sp & 0xfffffffc;
-    env->regs[15] = info->pc & ~1u;
-    env->thumb = info->pc & 1;
     cpu->power_state = PSCI_ON;
     env->halt_reason = NOT_HALTED;
     arm_rebuild_hflags(env);
     cs->halted = 0;
     cpu_resume(cs);
-
-    g_free(info);
 }
 
-static void rp2040_start_core1(RP2040State *s, uint32_t vtor,
-                               uint32_t sp, uint32_t pc)
+static bool rp2040_core1_powered_off(RP2040State *s)
 {
-    RP2040CoreLaunchInfo *info = g_new(RP2040CoreLaunchInfo, 1);
+    ARMCPU *cpu = s->armv7m[RP2040_PROC1].cpu;
 
-    info->vtor = vtor;
-    info->sp = sp;
-    info->pc = pc;
+    return !cpu || cpu->power_state == PSCI_OFF;
+}
+
+static void rp2040_start_core1(RP2040State *s)
+{
+    if (!s->armv7m[RP2040_PROC1].cpu ||
+        !rp2040_core1_powered_off(s)) {
+        return;
+    }
+
     async_run_on_cpu(CPU(s->armv7m[RP2040_PROC1].cpu),
                      rp2040_start_core1_async_work,
-                     RUN_ON_CPU_HOST_PTR(info));
+                     RUN_ON_CPU_NULL);
 }
 
 static void rp2040_stop_core1_async_work(CPUState *cs, run_on_cpu_data data)
@@ -260,13 +306,6 @@ static void rp2040_stop_core1_async_work(CPUState *cs, run_on_cpu_data data)
     cpu->env.halt_reason = HALT_PSCI;
     cs->halted = 1;
     cs->exception_index = EXCP_HLT;
-}
-
-static bool rp2040_core1_powered_off(RP2040State *s)
-{
-    ARMCPU *cpu = s->armv7m[RP2040_PROC1].cpu;
-
-    return !cpu || cpu->power_state == PSCI_OFF;
 }
 
 static void rp2040_stop_core1(RP2040State *s)
@@ -281,64 +320,16 @@ static void rp2040_stop_core1(RP2040State *s)
                      RUN_ON_CPU_NULL);
 }
 
-static void rp2040_core1_launch_fifo_write(void *opaque,
-                                           unsigned core,
-                                           uint32_t value)
-{
-    RP2040State *s = opaque;
-    static const uint32_t fixed_sequence[] = { 0, 0, 1 };
-
-    if (core != 0 || !s->core1_launch_ready ||
-        !rp2040_core1_powered_off(s)) {
-        return;
-    }
-
-    rp2040_sio_fifo_push_from_core(&s->sio, RP2040_PROC1, value);
-
-    switch (s->core1_launch_index) {
-    case 0:
-    case 1:
-    case 2:
-        if (value == fixed_sequence[s->core1_launch_index]) {
-            s->core1_launch_index++;
-        } else {
-            s->core1_launch_index = value == 0 ? 1 : 0;
-        }
-        break;
-    case 3:
-        s->core1_launch_vtor = value;
-        s->core1_launch_index++;
-        break;
-    case 4:
-        s->core1_launch_sp = value;
-        s->core1_launch_index++;
-        break;
-    case 5:
-        rp2040_start_core1(s, s->core1_launch_vtor,
-                           s->core1_launch_sp, value);
-        s->core1_launch_ready = false;
-        s->core1_launch_index = 0;
-        break;
-    default:
-        s->core1_launch_index = 0;
-        break;
-    }
-}
-
 static void rp2040_psm_update(void *opaque)
 {
     RP2040State *s = opaque;
     bool proc1_forced_off = rp2040_psm_get_frce_off(&s->psm) &
                             RP2040_PSM_PROC1;
 
-    s->core1_launch_index = 0;
     if (proc1_forced_off) {
-        s->core1_launch_ready = false;
         rp2040_stop_core1(s);
     } else {
-        s->core1_launch_ready = true;
-        rp2040_sio_fifo_drain_core(&s->sio, RP2040_PROC1);
-        rp2040_sio_fifo_push_from_core(&s->sio, RP2040_PROC1, 0);
+        rp2040_start_core1(s);
     }
 }
 
@@ -436,8 +427,6 @@ static void rp2040_soc_init(Object *obj)
                              ARM_CPU_TYPE_NAME("cortex-m0"));
         qdev_prop_set_uint32(DEVICE(&s->armv7m[i]), "num-irq", 32);
     }
-    qdev_prop_set_bit(DEVICE(&s->armv7m[1]), "start-powered-off", true);
-
     object_initialize_child(obj, "uart0", &s->uart0, TYPE_PL011);
     object_property_add_alias(obj, "serial0", OBJECT(&s->uart0), "chardev");
 
@@ -485,6 +474,8 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         error_setg(errp, "memory property was not set");
         return;
     }
+    qdev_prop_set_bit(DEVICE(&s->armv7m[RP2040_PROC1]), "start-powered-off",
+                      s->bootrom_file != NULL);
 
     if (!memory_region_init_rom(&s->rom, OBJECT(dev), "rp2040.rom",
                                 RP2040_ROM_SIZE, errp)) {
@@ -567,8 +558,6 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sio), 0, RP2040_SIO_BASE);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->sio), 0,
                        s->irq[RP2040_SIO_IRQ_PROC0]);
-    rp2040_sio_set_fifo_write_callback(&s->sio,
-                                       rp2040_core1_launch_fifo_write, s);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->syscfg), errp)) {
         return;

@@ -18,10 +18,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040SioState, RP2040_SIO)
 #define RP2040_SIO_NUM_CORES 2
 #define RP2040_SIO_FIFO_DEPTH 8
 
-typedef void (*RP2040SioFifoWriteFn)(void *opaque,
-                                     unsigned core,
-                                     uint32_t value);
-
 struct RP2040SioState {
     SysBusDevice parent_obj;
 
@@ -39,16 +35,6 @@ struct RP2040SioState {
     uint8_t fifo_level[RP2040_SIO_NUM_CORES];
     uint32_t fifo_sticky[RP2040_SIO_NUM_CORES];
     uint32_t spinlock_st;
-
-    RP2040SioFifoWriteFn fifo_write;
-    void *fifo_write_opaque;
 };
-
-void rp2040_sio_set_fifo_write_callback(RP2040SioState *s,
-                                        RP2040SioFifoWriteFn fifo_write,
-                                        void *opaque);
-void rp2040_sio_fifo_push_from_core(RP2040SioState *s, unsigned core,
-                                    uint32_t value);
-void rp2040_sio_fifo_drain_core(RP2040SioState *s, unsigned core);
 
 #endif
