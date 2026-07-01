@@ -446,14 +446,23 @@ Current SDK compatibility note:
 - [x] Re-run Pico SDK smoke tests without forcing compiler bit/mem helper
   implementations.
 - [x] Add synthetic `SF` and `SD` boot ROM data table entries so Pico SDK
-  float/double runtime init can copy the expected ROM table shape. Entries
-  currently point at explicit NYI stubs rather than real float/double helpers.
+  float/double runtime init can copy the expected ROM table shape.
+- [x] Implement initial softfloat-backed synthetic `SF` and `SD` helpers for
+  arithmetic, square root, 32/64-bit integer conversions, and float/double
+  conversions. Unsupported table entries still point at explicit NYI stubs.
+- [x] Add a no-SDK functional test for representative synthetic boot ROM
+  float/double helpers.
+- [x] Add an SDK-derived float/double smoke test under
+  `.local/rp2040-sdk-tests`; it remains outside Git and validates that a Pico
+  SDK build can use the synthetic ROM floating-point table successfully.
 - [x] Implement the flash-related boot ROM helper policy:
   `connect_internal_flash`, `flash_exit_xip`, `flash_flush_cache`, and
   `flash_enter_cmd_xip` are synthetic no-op helpers with explicit NYI traces
   for their unmodeled SSI/QSPI side effects; `flash_range_erase` and
   `flash_range_program` delegate to the QEMU XIP flash model and preserve raw
   flash-file writeback.
+- [ ] Implement or document remaining `SF`/`SD` table helpers such as
+  comparisons, fixed-point conversions, and transcendental functions.
 - [ ] Convert shallow RP2040 peripheral models to use the shared NYI helper for
   unimplemented-but-visible register behavior.
 
