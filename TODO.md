@@ -539,8 +539,11 @@ Current SDK compatibility note:
 - [x] Implement immediate `CHAN_ABORT`: abort clears `BUSY`, clears the
   transfer counter, self-clears on read because in-flight bus latency is not
   modelled, and has qtest coverage for a stalled paced channel.
+- [x] Implement DMA sniff accumulator updates for the documented RP2040
+  `CRC32`, `CRC32R`, `CRC16`, `CRC16R`, `EVEN`, and `SUM` modes, including
+  read-side output reverse/invert transforms and qtest coverage for `SUM`.
 - [ ] Implement or document remaining DMA features: UART paced DREQs, DMA
-  timer paced DREQs, sniff checksum, and error reporting fidelity.
+  timer paced DREQs, and error reporting fidelity.
 
 ## Phase 15c: SDK Flash Safe Execute and Multicore Lockout
 
