@@ -329,7 +329,7 @@ static void rp2040_dma_finish_channel(RP2040DmaState *s, unsigned index,
     uint32_t chain_to;
 
     ch->ctrl &= ~DMA_CTRL_BUSY;
-    if (!(ch->ctrl & DMA_CTRL_ERROR_MASK) && !(ch->ctrl & DMA_CTRL_IRQ_QUIET)) {
+    if (!(ch->ctrl & DMA_CTRL_IRQ_QUIET)) {
         s->intr |= BIT(index);
         rp2040_dma_update_irq(s);
     }
@@ -529,7 +529,12 @@ static void rp2040_dma_write_ctrl(RP2040DmaState *s, unsigned index,
     RP2040DmaChannel *ch = &s->chan[index];
     uint32_t errors = ch->ctrl & DMA_CTRL_ERROR_MASK;
 
-    errors &= ~(value & DMA_CTRL_ERROR_MASK);
+    errors &= ~(value & (DMA_CTRL_READ_ERROR | DMA_CTRL_WRITE_ERROR));
+    if (errors & (DMA_CTRL_READ_ERROR | DMA_CTRL_WRITE_ERROR)) {
+        errors |= DMA_CTRL_AHB_ERROR;
+    } else {
+        errors &= ~DMA_CTRL_AHB_ERROR;
+    }
     ch->ctrl = (value & DMA_CTRL_WRITABLE_MASK) | errors;
     if (trigger) {
         rp2040_dma_start_channel(s, index, 0);
@@ -675,6 +680,10 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
                          DMA_CHANNEL_MASK;
             rp2040_dma_update_irq(s);
             break;
+        case DMA_INTS0:
+            s->intr &= ~(value & DMA_CHANNEL_MASK);
+            rp2040_dma_update_irq(s);
+            break;
         case DMA_INTE1:
             s->inte[1] = rp2040_dma_apply_alias(s->inte[1], value, alias) &
                          DMA_CHANNEL_MASK;
@@ -683,6 +692,10 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
         case DMA_INTF1:
             s->intf[1] = rp2040_dma_apply_alias(s->intf[1], value, alias) &
                          DMA_CHANNEL_MASK;
+            rp2040_dma_update_irq(s);
+            break;
+        case DMA_INTS1:
+            s->intr &= ~(value & DMA_CHANNEL_MASK);
             rp2040_dma_update_irq(s);
             break;
         case DMA_TIMER0 ... DMA_TIMER0 + 3 * sizeof(uint32_t):
