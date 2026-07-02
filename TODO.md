@@ -393,8 +393,9 @@ Current clock/reset bring-up note:
   models: clocks, resets, watchdog, PLL/XOSC/ROSC, syscfg/sysinfo, tbman,
   vreg, timer, DMA, IO_QSPI, USBCTRL register storage, and XIP/SSI register
   access.
-- [ ] Add qtest coverage that can exercise both FIFO directions without
-  requiring a second Cortex-M0+ to execute guest code.
+- [x] Cover SIO FIFO behavior with `rp2040-sio-test` for proc0-visible status
+  and with functional multicore tests for both FIFO directions and proc1
+  execution.
 
 Current multicore groundwork note:
 
@@ -403,6 +404,8 @@ Current multicore groundwork note:
   service, not the host machine CPU id.
 - Proc1 FIFO IRQ output is routed to proc1. Peripheral IRQ routing beyond SIO
   is still mostly proc0-focused.
+- Quick validation:
+  `meson test -C build qemu:qtest-arm/rp2040-sio-test qemu:func-arm-raspi_pico --print-errorlogs`.
 
 ## Phase 14: Instantiate Cortex-M0+ Proc1
 
@@ -414,8 +417,9 @@ Current multicore groundwork note:
 - [x] Route `SIO_IRQ_PROC1` only to proc1.
 - [x] Ensure proc0 boot, UART, flash, timer, watchdog, and boot ROM tests still
   pass unchanged.
-- [ ] Document remaining proc1 limitations: external mask-ROM core1 path,
-  peripheral IRQ routing beyond SIO/IO_BANK0, and missing lockout support.
+- [x] Document remaining proc1 limitations: external mask-ROM core1 path is
+  validated by local SDK smoke tests but still lacks an in-tree no-SDK
+  regression; peripheral IRQ routing beyond SIO/IO_BANK0 remains limited.
 
 ## Phase 15: SDK-Compatible Core1 Launch
 
@@ -442,16 +446,21 @@ Current multicore groundwork note:
   `PT_LOAD` segments.
 - [x] Add synthetic ROM function-table helpers, or use the real mask ROM path,
   for Pico SDK builds that rely on boot ROM bit/mem/float/double helpers.
-- [ ] Document remaining SDK-behavior limitations: missing lockout support,
-  flash busy/XIP interactions, SIO interpolator coverage, paced DMA behaviour,
-  and reset fidelity.
+- [x] Document remaining SDK-behavior limitations: synthetic-ROM-only core1
+  launch, flash busy/XIP policy, SIO interpolator coverage, paced DMA
+  behaviour, and reset/power sequencing fidelity.
 
 Current SDK compatibility note:
 
-- The local SDK smoke test is kept outside git under `.local/` and configured
-  to use compiler implementations for bit, memory, float and double helpers.
-  Default Pico SDK RP2040 builds may call the boot ROM function table; QEMU's
-  synthetic ROM does not expose that ABI yet.
+- Local SDK smoke tests are kept outside git under `.local/`. The in-tree
+  no-SDK tests keep the same coverage self-contained for CI.
+- QEMU's synthetic ROM now exposes the RP2040 boot ROM table entries needed by
+  the current SDK smoke tests for bit, memory, float, double and flash helper
+  paths. Unsupported entries still route to explicit NYI stubs.
+- The main proc1 limitation is now the split between the synthetic ROM launch
+  path, which is covered by in-tree tests, and the external `pipico.rom`
+  core1 path, which is validated by local SDK smoke tests but still lacks a
+  self-contained in-tree regression.
 
 ## Phase 15a: Synthetic Boot ROM Function Table
 
