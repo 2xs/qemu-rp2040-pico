@@ -310,6 +310,40 @@ static void rp2040_dma_dreq_bh(void *opaque)
     }
 }
 
+static bool rp2040_dma_dreq_has_busy_channel(RP2040DmaState *s, uint32_t dreq,
+                                             unsigned except)
+{
+    int i;
+
+    for (i = 0; i < RP2040_DMA_NUM_CHANNELS; i++) {
+        RP2040DmaChannel *ch = &s->chan[i];
+
+        if (i != except && (ch->ctrl & DMA_CTRL_BUSY) &&
+            rp2040_dma_treq(ch) == dreq) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void rp2040_dma_abort_channel(RP2040DmaState *s, unsigned index)
+{
+    RP2040DmaChannel *ch = &s->chan[index];
+    uint32_t treq = rp2040_dma_treq(ch);
+
+    /*
+     * RP2040 CHAN_ABORT clears the transfer counter and leaves the channel
+     * inactive. QEMU does not model in-flight bus-transfer latency, so the
+     * abort status bit is clear as soon as the write completes.
+     */
+    ch->ctrl &= ~DMA_CTRL_BUSY;
+    ch->trans_count = 0;
+    if (treq < RP2040_DMA_NUM_DREQS &&
+        !rp2040_dma_dreq_has_busy_channel(s, treq, index)) {
+        s->pending_dreq[treq] = 0;
+    }
+}
+
 static uint32_t rp2040_dma_read_channel(RP2040DmaState *s, unsigned index,
                                         hwaddr offset)
 {
@@ -529,8 +563,7 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
             value &= DMA_CHANNEL_MASK;
             for (i = 0; i < RP2040_DMA_NUM_CHANNELS; i++) {
                 if (value & BIT(i)) {
-                    s->chan[i].ctrl &= ~DMA_CTRL_BUSY;
-                    s->chan[i].trans_count = 0;
+                    rp2040_dma_abort_channel(s, i);
                 }
             }
             break;
