@@ -12,6 +12,7 @@
 #include "hw/misc/rp2040_nyi.h"
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
+#include "qemu/host-utils.h"
 #include "qemu/log.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
@@ -70,6 +71,23 @@
 #define DMA_CTRL_ERROR_MASK      (DMA_CTRL_AHB_ERROR | \
                                   DMA_CTRL_READ_ERROR | \
                                   DMA_CTRL_WRITE_ERROR)
+
+#define DMA_SNIFF_CTRL_OUT_INV   BIT(11)
+#define DMA_SNIFF_CTRL_OUT_REV   BIT(10)
+#define DMA_SNIFF_CTRL_BSWAP     BIT(9)
+#define DMA_SNIFF_CTRL_CALC_SHIFT 5
+#define DMA_SNIFF_CTRL_CALC_MASK  (0xf << DMA_SNIFF_CTRL_CALC_SHIFT)
+#define DMA_SNIFF_CTRL_DMACH_SHIFT 1
+#define DMA_SNIFF_CTRL_DMACH_MASK (0xf << DMA_SNIFF_CTRL_DMACH_SHIFT)
+#define DMA_SNIFF_CTRL_EN        BIT(0)
+#define DMA_SNIFF_CTRL_MASK      0xfff
+
+#define DMA_SNIFF_CALC_CRC32     0x0
+#define DMA_SNIFF_CALC_CRC32R    0x1
+#define DMA_SNIFF_CALC_CRC16     0x2
+#define DMA_SNIFF_CALC_CRC16R    0x3
+#define DMA_SNIFF_CALC_EVEN      0xe
+#define DMA_SNIFF_CALC_SUM       0xf
 
 #define DMA_CTRL_WRITABLE_MASK   (DMA_CTRL_SNIFF_EN | DMA_CTRL_BSWAP | \
                                   DMA_CTRL_IRQ_QUIET | \
@@ -170,6 +188,140 @@ static uint32_t rp2040_dma_next_addr(RP2040DmaChannel *ch, uint32_t addr,
     return (addr & ~mask) | ((addr + width) & mask);
 }
 
+static uint32_t rp2040_dma_sniff_word(const uint8_t *buf, unsigned width)
+{
+    uint32_t value = buf[0];
+
+    if (width >= 2) {
+        value |= (uint32_t)buf[1] << 8;
+    }
+    if (width >= 4) {
+        value |= (uint32_t)buf[2] << 16;
+        value |= (uint32_t)buf[3] << 24;
+    }
+    return value;
+}
+
+static void rp2040_dma_sniff_bswap(uint8_t *buf, unsigned width)
+{
+    if (width == 2) {
+        uint8_t t = buf[0];
+        buf[0] = buf[1];
+        buf[1] = t;
+    } else if (width == 4) {
+        uint8_t t = buf[0];
+        buf[0] = buf[3];
+        buf[3] = t;
+        t = buf[1];
+        buf[1] = buf[2];
+        buf[2] = t;
+    }
+}
+
+static uint32_t rp2040_dma_sniff_crc32(uint32_t crc, const uint8_t *buf,
+                                       unsigned width, bool reverse)
+{
+    int i;
+    int bit;
+
+    for (i = 0; i < width; i++) {
+        uint8_t byte = reverse ? revbit8(buf[i]) : buf[i];
+
+        crc ^= (uint32_t)byte << 24;
+        for (bit = 0; bit < 8; bit++) {
+            crc = (crc & BIT(31)) ? (crc << 1) ^ 0x04c11db7 : crc << 1;
+        }
+    }
+    return crc;
+}
+
+static uint32_t rp2040_dma_sniff_crc16(uint32_t crc, const uint8_t *buf,
+                                       unsigned width, bool reverse)
+{
+    uint16_t crc16 = crc;
+    int i;
+    int bit;
+
+    for (i = 0; i < width; i++) {
+        uint8_t byte = reverse ? revbit8(buf[i]) : buf[i];
+
+        crc16 ^= (uint16_t)byte << 8;
+        for (bit = 0; bit < 8; bit++) {
+            crc16 = (crc16 & BIT(15)) ? (crc16 << 1) ^ 0x1021 : crc16 << 1;
+        }
+    }
+    return (crc & 0xffff0000) | crc16;
+}
+
+static void rp2040_dma_sniff_update(RP2040DmaState *s, unsigned index,
+                                    const uint8_t *buf, unsigned width)
+{
+    RP2040DmaChannel *ch = &s->chan[index];
+    uint8_t sniff_buf[4] = { 0 };
+    uint32_t channel;
+    uint32_t calc;
+    uint32_t value;
+
+    if (!(s->sniff_ctrl & DMA_SNIFF_CTRL_EN) ||
+        !(ch->ctrl & DMA_CTRL_SNIFF_EN)) {
+        return;
+    }
+
+    channel = (s->sniff_ctrl & DMA_SNIFF_CTRL_DMACH_MASK) >>
+              DMA_SNIFF_CTRL_DMACH_SHIFT;
+    if (channel != index) {
+        return;
+    }
+
+    memcpy(sniff_buf, buf, width);
+    if (s->sniff_ctrl & DMA_SNIFF_CTRL_BSWAP) {
+        rp2040_dma_sniff_bswap(sniff_buf, width);
+    }
+
+    calc = (s->sniff_ctrl & DMA_SNIFF_CTRL_CALC_MASK) >>
+           DMA_SNIFF_CTRL_CALC_SHIFT;
+    switch (calc) {
+    case DMA_SNIFF_CALC_CRC32:
+        s->sniff_data = rp2040_dma_sniff_crc32(s->sniff_data, sniff_buf,
+                                               width, false);
+        break;
+    case DMA_SNIFF_CALC_CRC32R:
+        s->sniff_data = rp2040_dma_sniff_crc32(s->sniff_data, sniff_buf,
+                                               width, true);
+        break;
+    case DMA_SNIFF_CALC_CRC16:
+        s->sniff_data = rp2040_dma_sniff_crc16(s->sniff_data, sniff_buf,
+                                               width, false);
+        break;
+    case DMA_SNIFF_CALC_CRC16R:
+        s->sniff_data = rp2040_dma_sniff_crc16(s->sniff_data, sniff_buf,
+                                               width, true);
+        break;
+    case DMA_SNIFF_CALC_EVEN:
+        value = rp2040_dma_sniff_word(sniff_buf, width);
+        s->sniff_data = (s->sniff_data ^ ctpop32(value)) & 1;
+        break;
+    case DMA_SNIFF_CALC_SUM:
+        s->sniff_data += rp2040_dma_sniff_word(sniff_buf, width);
+        break;
+    default:
+        break;
+    }
+}
+
+static uint32_t rp2040_dma_sniff_read_data(RP2040DmaState *s)
+{
+    uint32_t value = s->sniff_data;
+
+    if (s->sniff_ctrl & DMA_SNIFF_CTRL_OUT_REV) {
+        value = revbit32(value);
+    }
+    if (s->sniff_ctrl & DMA_SNIFF_CTRL_OUT_INV) {
+        value = ~value;
+    }
+    return value;
+}
+
 static void rp2040_dma_finish_channel(RP2040DmaState *s, unsigned index,
                                       unsigned chain_depth)
 {
@@ -201,11 +353,6 @@ static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
         return;
     }
 
-    if (ch->ctrl & DMA_CTRL_SNIFF_EN) {
-        rp2040_log_nyi("dma", "sniff transfer",
-                       "transfer runs without checksum update");
-    }
-
     width = rp2040_dma_transfer_size(ch);
     count = MIN(ch->trans_count, beats);
 
@@ -234,6 +381,7 @@ static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
                 buf[2] = t;
             }
         }
+        rp2040_dma_sniff_update(s, index, buf, width);
 
         result = address_space_rw(&s->dma_as, ch->write_addr,
                                   MEMTXATTRS_UNSPECIFIED, buf, width, true);
@@ -475,7 +623,7 @@ static uint64_t rp2040_dma_read(void *opaque, hwaddr addr, unsigned size)
             value = s->sniff_ctrl;
             break;
         case DMA_SNIFF_DATA:
-            value = s->sniff_data;
+            value = rp2040_dma_sniff_read_data(s);
             break;
         case DMA_FIFO_LEVELS:
             value = 0;
@@ -551,9 +699,8 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
             break;
         case DMA_SNIFF_CTRL:
             old = s->sniff_ctrl;
-            s->sniff_ctrl = rp2040_dma_apply_alias(old, value, alias);
-            rp2040_log_nyi("dma", "sniff control",
-                           "register is stored but checksum is not computed");
+            s->sniff_ctrl = rp2040_dma_apply_alias(old, value, alias) &
+                            DMA_SNIFF_CTRL_MASK;
             break;
         case DMA_SNIFF_DATA:
             s->sniff_data = rp2040_dma_apply_alias(s->sniff_data, value,
