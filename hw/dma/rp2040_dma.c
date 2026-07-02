@@ -155,6 +155,7 @@ static unsigned rp2040_dma_transfer_size(RP2040DmaChannel *ch)
 static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
                                      unsigned chain_depth);
 static void rp2040_dma_dreq(void *opaque, int n, int level);
+static void rp2040_dma_dreq_pulse(RP2040DmaState *s, uint32_t dreq);
 static bool rp2040_dma_dreq_has_busy_channel(RP2040DmaState *s, uint32_t dreq,
                                              unsigned except);
 
@@ -170,6 +171,11 @@ static bool rp2040_dma_treq_is_ready_sink(uint32_t treq)
      * its data register are accepted immediately.
      */
     return treq == RP2040_DREQ_XIP_SSITX;
+}
+
+static bool rp2040_dma_treq_is_connected_level(uint32_t treq)
+{
+    return treq == RP2040_DREQ_UART0_TX || treq == RP2040_DREQ_UART0_RX;
 }
 
 static bool rp2040_dma_treq_is_timer(uint32_t treq)
@@ -223,7 +229,7 @@ static void rp2040_dma_timer_cb(void *opaque)
     uint32_t dreq = RP2040_DREQ_DMA_TIMER0 + pt->index;
 
     if (rp2040_dma_dreq_has_busy_channel(s, dreq, RP2040_DMA_NUM_CHANNELS)) {
-        rp2040_dma_dreq(s, dreq, 1);
+        rp2040_dma_dreq_pulse(s, dreq);
     }
     if (pt->period_ns != 0) {
         timer_mod(pt->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
@@ -482,7 +488,12 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
     treq = rp2040_dma_treq(ch);
     if (treq == RP2040_DREQ_FORCE || rp2040_dma_treq_is_ready_sink(treq)) {
         rp2040_dma_run_beats(s, index, UINT32_MAX, chain_depth);
+    } else if ((rp2040_dma_treq_is_connected_level(treq) ||
+                treq == RP2040_DREQ_XIP_SSIRX) &&
+               s->dreq_level[treq]) {
+        rp2040_dma_dreq_pulse(s, treq);
     } else if (treq != RP2040_DREQ_XIP_SSIRX &&
+               !rp2040_dma_treq_is_connected_level(treq) &&
                !rp2040_dma_treq_is_timer(treq) &&
                !ch->paced_nyi_logged) {
         rp2040_log_nyi("dma", "paced transfer",
@@ -491,18 +502,30 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
     }
 }
 
+static void rp2040_dma_dreq_pulse(RP2040DmaState *s, uint32_t dreq)
+{
+    if (dreq >= RP2040_DMA_NUM_DREQS) {
+        return;
+    }
+
+    if (s->pending_dreq[dreq] != UINT32_MAX) {
+        s->pending_dreq[dreq]++;
+    }
+    qemu_bh_schedule(s->dreq_bh);
+}
+
 static void rp2040_dma_dreq(void *opaque, int n, int level)
 {
     RP2040DmaState *s = opaque;
 
-    if (!level || n < 0 || n >= RP2040_DMA_NUM_DREQS) {
+    if (n < 0 || n >= RP2040_DMA_NUM_DREQS) {
         return;
     }
 
-    if (s->pending_dreq[n] != UINT32_MAX) {
-        s->pending_dreq[n]++;
+    s->dreq_level[n] = level;
+    if (level) {
+        rp2040_dma_dreq_pulse(s, n);
     }
-    qemu_bh_schedule(s->dreq_bh);
 }
 
 static void rp2040_dma_dreq_bh(void *opaque)
@@ -520,6 +543,11 @@ static void rp2040_dma_dreq_bh(void *opaque)
                 if ((ch->ctrl & DMA_CTRL_BUSY) && rp2040_dma_treq(ch) == dreq) {
                     rp2040_dma_run_beats(s, i, 1, 0);
                 }
+            }
+            if (s->dreq_level[dreq] &&
+                rp2040_dma_dreq_has_busy_channel(s, dreq,
+                                                 RP2040_DMA_NUM_CHANNELS)) {
+                rp2040_dma_dreq_pulse(s, dreq);
             }
         }
     }
@@ -840,6 +868,7 @@ static void rp2040_dma_reset(DeviceState *dev)
         s->pacing_timer[i].period_ns = 0;
         timer_del(s->pacing_timer[i].timer);
     }
+    memset(s->dreq_level, 0, sizeof(s->dreq_level));
     memset(s->pending_dreq, 0, sizeof(s->pending_dreq));
     qemu_bh_cancel(s->dreq_bh);
     s->sniff_ctrl = 0;

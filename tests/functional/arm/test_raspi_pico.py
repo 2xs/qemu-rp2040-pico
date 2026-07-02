@@ -4,7 +4,11 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import os
+import socket
 import struct
+import subprocess
+import time
 
 from qemu_test import QemuSystemTest, wait_for_console_pattern
 
@@ -410,6 +414,27 @@ class RaspiPicoMachine(QemuSystemTest):
         0xac, 0x00, 0x00, 0x10, 0xb4, 0x00, 0x00, 0x10,
         0xbe, 0x00, 0x00, 0x10, 0x00, 0x40, 0x03, 0x40,
     ])
+
+    # Exercises UART0 paced DMA. Channel 0 first sends a trace string through
+    # UART0 TX DREQ and waits for DMA IRQ0. It then receives "HELLO" through
+    # UART0 RX DREQ, waits for DMA IRQ0 again, verifies the bytes in SRAM, and
+    # sends the success string through UART0 TX DREQ.
+    DMA_UART_TEST_BIN = bytes.fromhex(
+        '0020042071000010230100102301001000000000000000000000000000000000'
+        '0000000000000000000000002301001000000000000000002301001023010010'
+        '2301001023010010230100102301001023010010230100102301001023010010'
+        '2301001023010010230100101701001072b63948394901630321816438483949'
+        '016062b638480f2100f019f83748052100f023f835483649052203780c78'
+        'a34208d101300131013af7d132480c2100f006f836e030480e2100f001f8'
+        '31e010b50c4600f018f82d4a1060234b536094602b4bd36000f018f810bd'
+        '10b50c4600f00af8264a1c4b136050609460254bd36000f00af810bd'
+        '244a00231360234a01231360234a136070471f4a30bf136801242342'
+        'fad070471d48016801601a480160704730bffde7c046444d41205541'
+        '52542054524143450a48454c4c4f444d412055415254204f4b0a'
+        '444d412055415254204641494c0a0000004003400103000000e100e0'
+        '000800002801001010000020370100103c0100104801001000000050'
+        '11000a0021800a00000000200004005004040050'
+    )
 
     BOOT2_W25Q080_BIN = bytes.fromhex(
         '00b5324b212058609868022188439860'
@@ -931,6 +956,38 @@ class RaspiPicoMachine(QemuSystemTest):
         self.vm.launch()
 
         wait_for_console_pattern(self, 'DMA OK')
+
+    def test_dma_uart_tx_rx(self):
+        image = self.scratch_file('dma-uart-test.bin')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_bootable_image(self.DMA_UART_TEST_BIN))
+
+        guest_sock, qemu_sock = socket.socketpair()
+        os.set_inheritable(qemu_sock.fileno(), True)
+        qemu = subprocess.Popen([
+            self.qemu_bin,
+            '-machine', 'raspi-pico,strict-uart-pins=off',
+            '-kernel', image,
+            '-chardev', f'socket,id=console,fd={qemu_sock.fileno()}',
+            '-serial', 'chardev:console',
+            '-display', 'none',
+        ], cwd=os.path.dirname(os.getenv('MESON_BUILD_ROOT')),
+           pass_fds=(qemu_sock.fileno(),))
+        qemu_sock.close()
+        guest_sock.settimeout(10)
+        data = b''
+        try:
+            while b'DMA UART TRACE' not in data:
+                data += guest_sock.recv(1)
+            time.sleep(2.0)
+            guest_sock.sendall(b'HELLO\r')
+            while b'DMA UART OK' not in data:
+                data += guest_sock.recv(1)
+        finally:
+            qemu.terminate()
+            qemu.wait(timeout=2)
+            guest_sock.close()
+        self.assertIn(b'DMA UART OK', data)
 
     def test_flash_file_uart0(self):
         flash = self.scratch_file('flash.bin')

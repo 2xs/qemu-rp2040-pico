@@ -356,6 +356,10 @@ RP2040 UART programmer's model: ``UARTDR`` is at offset ``0x000``,
 ``UARTRSR/UARTECR`` at ``0x004`` and ``UARTFR`` at ``0x018``.  See datasheet
 pages 429 to 431.
 
+The RP2040 APB atomic alias windows for UART0 are also mapped, because the
+Pico SDK uses them when configuring UART registers.  ``UARTDMACR`` drives
+UART0 TX/RX DREQ lines into the RP2040 DMA model.
+
 The console path uses QEMU's standard serial backends, so the host side can
 still be selected with the usual ``-serial`` or ``-chardev`` options.  By
 default, the Pico machine requires the guest to route UART0 through
@@ -420,18 +424,20 @@ Known limitations
  * USB, PIO and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.  DMA supports memory-to-memory
-   transfers, XIP/SSI RX DREQ pacing, DMA timer pacing from QEMU virtual time,
-   read/write ring wrapping, the documented sniff accumulator modes, immediate
-   channel abort, and bus-error status reporting through ``CTRL_TRIG``,
-   ``INTR`` and ``INTS0/1``.  DMA timer pacing uses the documented ``X/Y``
-   fractional timer registers and the Pico's nominal 125 MHz system clock as
-   the virtual source.  DMA bus errors are reported with the documented
+   transfers, XIP/SSI RX DREQ pacing, UART0 TX/RX DREQ pacing, DMA timer
+   pacing from QEMU virtual time, read/write ring wrapping, the documented
+   sniff accumulator modes, immediate channel abort, and bus-error status
+   reporting through ``CTRL_TRIG``, ``INTR`` and ``INTS0/1``.  UART0 DREQs are
+   exposed through the current PL011-backed UART model and follow the PL011
+   FIFO occupancy plus ``UARTDMACR`` enable bits; fine-grained UART timing is
+   not modeled.  DMA timer pacing uses the documented ``X/Y`` fractional timer
+   registers and the Pico's nominal 125 MHz system clock as the virtual source.
+   DMA bus errors are reported with the documented
    ``READ_ERROR`` or ``WRITE_ERROR`` plus ``AHB_ERROR`` bits, clear ``BUSY``,
    keep the remaining transfer count, and raise the raw channel interrupt.
    QEMU does not model DMA pipeline latency: abort status self-clears
    immediately, and the reported fault address is the exact attempted address
-   rather than a delayed approximate address.  UART paced DREQs remain future
-   work.
+   rather than a delayed approximate address.
  * ``SYSINFO`` and ``SYSCFG`` expose the documented register layout used by
    early firmware.  ``PROC0_NMI_MASK`` is wired for interrupt sources routed
    through the RP2040 IRQ shim, currently including UART0, and

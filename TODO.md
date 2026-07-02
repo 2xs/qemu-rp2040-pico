@@ -520,7 +520,7 @@ Current SDK compatibility note:
   channels without knowing which channel is listening to a given DREQ.
 - [x] Connect the current XIP/SSI flash model to `DREQ_XIP_SSIRX`; keep
   `DREQ_XIP_SSITX` as an always-ready sink while the SSI TX FIFO is shallow.
-- [ ] Connect UART0 TX/RX DREQs through a small RP2040 UART wrapper or a
+- [x] Connect UART0 TX/RX DREQs through a small RP2040 UART wrapper or a
   carefully scoped PL011 DREQ extension.
 - [x] Implement DMA timer DREQs with virtual-time scheduling owned by the DMA
   timer source, not by host realtime sleeps.
@@ -546,7 +546,8 @@ Current SDK compatibility note:
   `READ_ERROR`/`WRITE_ERROR` and derived `AHB_ERROR` bits, clear `BUSY`, keep
   the remaining transfer count, raise raw `INTR`, support `INTS0/1` write-one
   IRQ acknowledgement, and have SDK plus qtest coverage.
-- [ ] Implement or document remaining DMA features: UART paced DREQs.
+- [x] Implement UART paced DREQs for UART0 TX/RX and validate them with a
+  no-SDK functional test plus an SDK `hardware_uart`/`hardware_dma` smoke test.
 
 ## Phase 15c: SDK Flash Safe Execute and Multicore Lockout
 
