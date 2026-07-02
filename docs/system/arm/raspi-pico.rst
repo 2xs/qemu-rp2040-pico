@@ -420,15 +420,18 @@ Known limitations
  * USB, PIO and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.  DMA supports memory-to-memory
-   transfers, XIP/SSI RX DREQ pacing, read/write ring wrapping, the documented
-   sniff accumulator modes, immediate channel abort, and bus-error status
-   reporting through ``CTRL_TRIG``, ``INTR`` and ``INTS0/1``.  DMA bus errors
-   are reported with the documented ``READ_ERROR`` or ``WRITE_ERROR`` plus
-   ``AHB_ERROR`` bits, clear ``BUSY``, keep the remaining transfer count, and
-   raise the raw channel interrupt.  QEMU does not model DMA pipeline latency:
-   abort status self-clears immediately, and the reported fault address is the
-   exact attempted address rather than a delayed approximate address.  UART
-   paced DREQs and DMA timer paced DREQs remain future work.
+   transfers, XIP/SSI RX DREQ pacing, DMA timer pacing from QEMU virtual time,
+   read/write ring wrapping, the documented sniff accumulator modes, immediate
+   channel abort, and bus-error status reporting through ``CTRL_TRIG``,
+   ``INTR`` and ``INTS0/1``.  DMA timer pacing uses the documented ``X/Y``
+   fractional timer registers and the Pico's nominal 125 MHz system clock as
+   the virtual source.  DMA bus errors are reported with the documented
+   ``READ_ERROR`` or ``WRITE_ERROR`` plus ``AHB_ERROR`` bits, clear ``BUSY``,
+   keep the remaining transfer count, and raise the raw channel interrupt.
+   QEMU does not model DMA pipeline latency: abort status self-clears
+   immediately, and the reported fault address is the exact attempted address
+   rather than a delayed approximate address.  UART paced DREQs remain future
+   work.
  * ``SYSINFO`` and ``SYSCFG`` expose the documented register layout used by
    early firmware.  ``PROC0_NMI_MASK`` is wired for interrupt sources routed
    through the RP2040 IRQ shim, currently including UART0, and

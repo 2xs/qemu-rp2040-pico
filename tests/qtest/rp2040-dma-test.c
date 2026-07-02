@@ -16,6 +16,7 @@
 #define DMA_INTR                0x400
 #define DMA_INTE0               0x404
 #define DMA_INTS0               0x40c
+#define DMA_TIMER0              0x420
 #define DMA_SNIFF_CTRL          0x434
 #define DMA_SNIFF_DATA          0x438
 #define DMA_CHAN_ABORT          0x444
@@ -40,6 +41,7 @@
 #define DMA_SNIFF_CTRL_CALC_SUM (0xf << 5)
 #define DMA_SNIFF_CTRL_EN       BIT(0)
 
+#define DREQ_DMA_TIMER0         59
 #define DREQ_XIP_SSIRX          39
 #define DREQ_FORCE              63
 
@@ -234,6 +236,57 @@ static void test_dma_error_status(void)
     qtest_quit(qts);
 }
 
+static void test_dma_timer_dreq(void)
+{
+    QTestState *qts = rp2040_start();
+    const uint8_t source[] = { 0xa1, 0xb2, 0xc3 };
+    uint8_t dest[sizeof(source)];
+    uint32_t read_addr = SRAM_BASE + 0x280;
+    uint32_t write_addr = SRAM_BASE + 0x290;
+    uint32_t ctrl = DMA_CTRL_EN | DMA_CTRL_INCR_READ | DMA_CTRL_INCR_WRITE |
+                    DMA_CTRL_DATA_SIZE_8 |
+                    (DREQ_DMA_TIMER0 << DMA_CTRL_TREQ_SEL_SHIFT);
+
+    qtest_memwrite(qts, read_addr, source, sizeof(source));
+    memset(dest, 0, sizeof(dest));
+    qtest_memwrite(qts, write_addr, dest, sizeof(dest));
+    qtest_writel(qts, DMA_BASE + DMA_CH_READ_ADDR, read_addr);
+    qtest_writel(qts, DMA_BASE + DMA_CH_WRITE_ADDR, write_addr);
+    qtest_writel(qts, DMA_BASE + DMA_CH_TRANS_COUNT, sizeof(source));
+    qtest_writel(qts, DMA_BASE + DMA_CH_CTRL_TRIG, ctrl);
+
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_CTRL_TRIG) &
+                    DMA_CTRL_BUSY, ==, DMA_CTRL_BUSY);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==,
+                    sizeof(source));
+
+    /*
+     * X/Y = 1/1000 on a nominal 125 MHz sys_clk gives one DREQ every
+     * 8000 ns of QEMU virtual time.
+     */
+    qtest_writel(qts, DMA_BASE + DMA_TIMER0, (1u << 16) | 1000u);
+    qtest_clock_step(qts, 7999);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==,
+                    sizeof(source));
+
+    qtest_clock_step(qts, 1);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==, 2);
+    g_assert_cmphex(qtest_readb(qts, write_addr), ==, source[0]);
+
+    qtest_clock_step(qts, 8000);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==, 1);
+    g_assert_cmphex(qtest_readb(qts, write_addr + 1), ==, source[1]);
+
+    qtest_clock_step(qts, 8000);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_CTRL_TRIG) &
+                    DMA_CTRL_BUSY, ==, 0);
+    qtest_memread(qts, write_addr, dest, sizeof(dest));
+    g_assert_cmpmem(dest, sizeof(dest), source, sizeof(source));
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -248,6 +301,8 @@ int main(int argc, char **argv)
                    test_dma_sniff_sum);
     qtest_add_func("/rp2040-dma/error-status",
                    test_dma_error_status);
+    qtest_add_func("/rp2040-dma/timer-dreq",
+                   test_dma_timer_dreq);
 
     return g_test_run();
 }

@@ -16,6 +16,7 @@
 #include "qemu/log.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
+#include "qemu/timer.h"
 
 #define DMA_CH_SIZE              0x40
 #define DMA_CH_READ_ADDR         0x00
@@ -100,6 +101,8 @@
                                   DMA_CTRL_DATA_SIZE_MASK | \
                                   BIT(1) | DMA_CTRL_EN)
 #define DMA_CHANNEL_MASK         ((1u << RP2040_DMA_NUM_CHANNELS) - 1)
+#define DMA_PACING_SYSCLK_HZ     125000000ULL
+#define DMA_PACING_SYSCLK_NS     8ULL
 
 #define ATOMIC_ALIAS_MASK        0x3000
 #define ATOMIC_XOR               0x1000
@@ -151,6 +154,9 @@ static unsigned rp2040_dma_transfer_size(RP2040DmaChannel *ch)
 
 static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
                                      unsigned chain_depth);
+static void rp2040_dma_dreq(void *opaque, int n, int level);
+static bool rp2040_dma_dreq_has_busy_channel(RP2040DmaState *s, uint32_t dreq,
+                                             unsigned except);
 
 static uint32_t rp2040_dma_treq(RP2040DmaChannel *ch)
 {
@@ -164,6 +170,65 @@ static bool rp2040_dma_treq_is_ready_sink(uint32_t treq)
      * its data register are accepted immediately.
      */
     return treq == RP2040_DREQ_XIP_SSITX;
+}
+
+static bool rp2040_dma_treq_is_timer(uint32_t treq)
+{
+    return treq >= RP2040_DREQ_DMA_TIMER0 &&
+           treq <= RP2040_DREQ_DMA_TIMER3;
+}
+
+static uint64_t rp2040_dma_timer_period_ns(uint32_t value)
+{
+    uint32_t x = value >> 16;
+    uint32_t y = value & 0xffff;
+    uint64_t period;
+
+    if (x == 0 || y == 0) {
+        return 0;
+    }
+
+    /*
+     * The RP2040 fractional timer emits TREQs at (X/Y) * sys_clk, capped
+     * at one TREQ per sys_clk. Use the Pico's nominal 125 MHz system clock
+     * as the virtual pacing source.
+     */
+    if (x >= y) {
+        return DMA_PACING_SYSCLK_NS;
+    }
+
+    period = DIV_ROUND_UP((uint64_t)y * NANOSECONDS_PER_SECOND,
+                          (uint64_t)x * DMA_PACING_SYSCLK_HZ);
+    return MAX(period, 1);
+}
+
+static void rp2040_dma_timer_update(RP2040DmaState *s, unsigned index)
+{
+    RP2040DmaPacingTimer *pt = &s->pacing_timer[index];
+
+    pt->period_ns = rp2040_dma_timer_period_ns(s->timer[index]);
+    if (pt->period_ns == 0) {
+        timer_del(pt->timer);
+        return;
+    }
+
+    timer_mod(pt->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+              pt->period_ns);
+}
+
+static void rp2040_dma_timer_cb(void *opaque)
+{
+    RP2040DmaPacingTimer *pt = opaque;
+    RP2040DmaState *s = pt->dma;
+    uint32_t dreq = RP2040_DREQ_DMA_TIMER0 + pt->index;
+
+    if (rp2040_dma_dreq_has_busy_channel(s, dreq, RP2040_DMA_NUM_CHANNELS)) {
+        rp2040_dma_dreq(s, dreq, 1);
+    }
+    if (pt->period_ns != 0) {
+        timer_mod(pt->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                  pt->period_ns);
+    }
 }
 
 static uint32_t rp2040_dma_next_addr(RP2040DmaChannel *ch, uint32_t addr,
@@ -417,7 +482,9 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
     treq = rp2040_dma_treq(ch);
     if (treq == RP2040_DREQ_FORCE || rp2040_dma_treq_is_ready_sink(treq)) {
         rp2040_dma_run_beats(s, index, UINT32_MAX, chain_depth);
-    } else if (treq != RP2040_DREQ_XIP_SSIRX && !ch->paced_nyi_logged) {
+    } else if (treq != RP2040_DREQ_XIP_SSIRX &&
+               !rp2040_dma_treq_is_timer(treq) &&
+               !ch->paced_nyi_logged) {
         rp2040_log_nyi("dma", "paced transfer",
                        "DREQ source is not connected yet");
         ch->paced_nyi_logged = true;
@@ -701,6 +768,7 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
         case DMA_TIMER0 ... DMA_TIMER0 + 3 * sizeof(uint32_t):
             i = (offset - DMA_TIMER0) / sizeof(uint32_t);
             s->timer[i] = rp2040_dma_apply_alias(s->timer[i], value, alias);
+            rp2040_dma_timer_update(s, i);
             break;
         case DMA_MULTI_CHAN_TRIGGER:
             value &= DMA_CHANNEL_MASK;
@@ -768,6 +836,10 @@ static void rp2040_dma_reset(DeviceState *dev)
     s->intf[0] = 0;
     s->intf[1] = 0;
     memset(s->timer, 0, sizeof(s->timer));
+    for (i = 0; i < RP2040_DMA_NUM_TIMERS; i++) {
+        s->pacing_timer[i].period_ns = 0;
+        timer_del(s->pacing_timer[i].timer);
+    }
     memset(s->pending_dreq, 0, sizeof(s->pending_dreq));
     qemu_bh_cancel(s->dreq_bh);
     s->sniff_ctrl = 0;
@@ -790,12 +862,23 @@ static void rp2040_dma_init(Object *obj)
     s->dreq_bh = qemu_bh_new(rp2040_dma_dreq_bh, s);
     qdev_init_gpio_in_named(DEVICE(obj), rp2040_dma_dreq, "dreq",
                             RP2040_DMA_NUM_DREQS);
+    for (i = 0; i < RP2040_DMA_NUM_TIMERS; i++) {
+        s->pacing_timer[i].dma = s;
+        s->pacing_timer[i].index = i;
+        s->pacing_timer[i].timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
+                                                rp2040_dma_timer_cb,
+                                                &s->pacing_timer[i]);
+    }
 }
 
 static void rp2040_dma_finalize(Object *obj)
 {
     RP2040DmaState *s = RP2040_DMA(obj);
+    int i;
 
+    for (i = 0; i < RP2040_DMA_NUM_TIMERS; i++) {
+        timer_free(s->pacing_timer[i].timer);
+    }
     qemu_bh_delete(s->dreq_bh);
 }
 
