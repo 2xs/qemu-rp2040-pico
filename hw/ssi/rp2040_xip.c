@@ -125,6 +125,7 @@ static void rp2040_xip_rx_push(RP2040XipState *s, uint8_t value)
 
     if (s->rx_len < ARRAY_SIZE(s->rx)) {
         s->rx[s->rx_len++] = value;
+        qemu_irq_pulse(s->dreq_rx);
     }
 }
 
@@ -1106,6 +1107,13 @@ static void rp2040_xip_finalize(Object *obj)
     g_free(s->storage);
 }
 
+static void rp2040_xip_init(Object *obj)
+{
+    RP2040XipState *s = RP2040_XIP(obj);
+
+    qdev_init_gpio_out_named(DEVICE(obj), &s->dreq_rx, "dreq-rx", 1);
+}
+
 static const Property rp2040_xip_properties[] = {
     DEFINE_PROP_UINT32("flash-size", RP2040XipState, flash_size, 2 * MiB),
     DEFINE_PROP_STRING("flash-file", RP2040XipState, flash_file),
@@ -1124,6 +1132,7 @@ static const TypeInfo rp2040_xip_info = {
     .name          = TYPE_RP2040_XIP,
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(RP2040XipState),
+    .instance_init = rp2040_xip_init,
     .instance_finalize = rp2040_xip_finalize,
     .class_init    = rp2040_xip_class_init,
 };

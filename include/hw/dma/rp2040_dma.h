@@ -18,6 +18,13 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040DmaState, RP2040_DMA)
 #define RP2040_DMA_SIZE 0x4000
 #define RP2040_DMA_NUM_CHANNELS 12
 #define RP2040_DMA_NUM_IRQS 2
+#define RP2040_DMA_NUM_DREQS 64
+
+#define RP2040_DREQ_UART0_TX 20
+#define RP2040_DREQ_UART0_RX 21
+#define RP2040_DREQ_XIP_SSITX 38
+#define RP2040_DREQ_XIP_SSIRX 39
+#define RP2040_DREQ_FORCE 63
 
 typedef struct RP2040DmaChannel {
     uint32_t read_addr;
@@ -25,6 +32,7 @@ typedef struct RP2040DmaChannel {
     uint32_t trans_count;
     uint32_t reload_count;
     uint32_t ctrl;
+    bool paced_nyi_logged;
 } RP2040DmaChannel;
 
 struct RP2040DmaState {
@@ -42,6 +50,8 @@ struct RP2040DmaState {
     uint32_t timer[4];
     uint32_t sniff_ctrl;
     uint32_t sniff_data;
+    QEMUBH *dreq_bh;
+    uint32_t pending_dreq[RP2040_DMA_NUM_DREQS];
 };
 
 #endif

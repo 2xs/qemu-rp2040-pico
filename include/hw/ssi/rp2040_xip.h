@@ -8,6 +8,7 @@
 #define HW_SSI_RP2040_XIP_H
 
 #include "hw/core/sysbus.h"
+#include "hw/core/irq.h"
 #include "qom/object.h"
 
 #define TYPE_RP2040_XIP "rp2040-xip"
@@ -24,6 +25,7 @@ struct RP2040XipState {
     MemoryRegion xip;
     MemoryRegion ctrl;
     MemoryRegion ssi;
+    qemu_irq dreq_rx;
 
     uint32_t flash_size;
     char *flash_file;

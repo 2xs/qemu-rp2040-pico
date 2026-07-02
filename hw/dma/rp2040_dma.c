@@ -13,6 +13,7 @@
 #include "migration/vmstate.h"
 #include "qemu/bitops.h"
 #include "qemu/log.h"
+#include "qemu/main-loop.h"
 #include "qemu/module.h"
 
 #define DMA_CH_SIZE              0x40
@@ -79,7 +80,6 @@
                                   DMA_CTRL_INCR_READ | \
                                   DMA_CTRL_DATA_SIZE_MASK | \
                                   BIT(1) | DMA_CTRL_EN)
-#define DMA_TREQ_FORCE           0x3f
 #define DMA_CHANNEL_MASK         ((1u << RP2040_DMA_NUM_CHANNELS) - 1)
 
 #define ATOMIC_ALIAS_MASK        0x3000
@@ -131,10 +131,46 @@ static unsigned rp2040_dma_transfer_size(RP2040DmaChannel *ch)
 }
 
 static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
-                                     unsigned chain_depth)
+                                     unsigned chain_depth);
+
+static uint32_t rp2040_dma_treq(RP2040DmaChannel *ch)
+{
+    return (ch->ctrl & DMA_CTRL_TREQ_SEL_MASK) >> DMA_CTRL_TREQ_SEL_SHIFT;
+}
+
+static bool rp2040_dma_treq_is_ready_sink(uint32_t treq)
+{
+    /*
+     * The current XIP/SSI TX model does not have a finite TX FIFO: writes to
+     * its data register are accepted immediately.
+     */
+    return treq == RP2040_DREQ_XIP_SSITX;
+}
+
+static void rp2040_dma_finish_channel(RP2040DmaState *s, unsigned index,
+                                      unsigned chain_depth)
 {
     RP2040DmaChannel *ch = &s->chan[index];
     uint32_t chain_to;
+
+    ch->ctrl &= ~DMA_CTRL_BUSY;
+    if (!(ch->ctrl & DMA_CTRL_ERROR_MASK) && !(ch->ctrl & DMA_CTRL_IRQ_QUIET)) {
+        s->intr |= BIT(index);
+        rp2040_dma_update_irq(s);
+    }
+
+    chain_to = (ch->ctrl & DMA_CTRL_CHAIN_TO_MASK) >> DMA_CTRL_CHAIN_TO_SHIFT;
+    if (!(ch->ctrl & DMA_CTRL_ERROR_MASK) &&
+        chain_to < RP2040_DMA_NUM_CHANNELS && chain_to != index &&
+        chain_depth < RP2040_DMA_NUM_CHANNELS) {
+        rp2040_dma_start_channel(s, chain_to, chain_depth + 1);
+    }
+}
+
+static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
+                                 uint32_t beats, unsigned chain_depth)
+{
+    RP2040DmaChannel *ch = &s->chan[index];
     uint32_t count;
     unsigned width;
 
@@ -142,20 +178,13 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
         return;
     }
 
-    if ((ch->ctrl & DMA_CTRL_TREQ_SEL_MASK) !=
-        (DMA_TREQ_FORCE << DMA_CTRL_TREQ_SEL_SHIFT)) {
-        rp2040_log_nyi("dma", "paced transfer",
-                       "non-FORCE DREQ is treated as immediately ready");
-    }
     if (ch->ctrl & (DMA_CTRL_SNIFF_EN | DMA_CTRL_RING_SIZE_MASK)) {
         rp2040_log_nyi("dma", "sniff/ring transfer",
                        "transfer runs without checksum or ring wrapping");
     }
 
-    ch->ctrl |= DMA_CTRL_BUSY;
-    ch->ctrl &= ~DMA_CTRL_ERROR_MASK;
     width = rp2040_dma_transfer_size(ch);
-    count = ch->trans_count;
+    count = MIN(ch->trans_count, beats);
 
     while (count--) {
         uint8_t buf[4] = { 0 };
@@ -199,17 +228,66 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
         }
     }
 
-    ch->ctrl &= ~DMA_CTRL_BUSY;
-    if (!(ch->ctrl & DMA_CTRL_ERROR_MASK) && !(ch->ctrl & DMA_CTRL_IRQ_QUIET)) {
-        s->intr |= BIT(index);
-        rp2040_dma_update_irq(s);
+    if ((ch->ctrl & DMA_CTRL_ERROR_MASK) || ch->trans_count == 0) {
+        rp2040_dma_finish_channel(s, index, chain_depth);
+    }
+}
+
+static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
+                                     unsigned chain_depth)
+{
+    RP2040DmaChannel *ch = &s->chan[index];
+    uint32_t treq;
+
+    if (!(ch->ctrl & DMA_CTRL_EN) || ch->trans_count == 0) {
+        return;
     }
 
-    chain_to = (ch->ctrl & DMA_CTRL_CHAIN_TO_MASK) >> DMA_CTRL_CHAIN_TO_SHIFT;
-    if (!(ch->ctrl & DMA_CTRL_ERROR_MASK) &&
-        chain_to < RP2040_DMA_NUM_CHANNELS && chain_to != index &&
-        chain_depth < RP2040_DMA_NUM_CHANNELS) {
-        rp2040_dma_start_channel(s, chain_to, chain_depth + 1);
+    ch->ctrl |= DMA_CTRL_BUSY;
+    ch->ctrl &= ~DMA_CTRL_ERROR_MASK;
+    ch->paced_nyi_logged = false;
+
+    treq = rp2040_dma_treq(ch);
+    if (treq == RP2040_DREQ_FORCE || rp2040_dma_treq_is_ready_sink(treq)) {
+        rp2040_dma_run_beats(s, index, UINT32_MAX, chain_depth);
+    } else if (treq != RP2040_DREQ_XIP_SSIRX && !ch->paced_nyi_logged) {
+        rp2040_log_nyi("dma", "paced transfer",
+                       "DREQ source is not connected yet");
+        ch->paced_nyi_logged = true;
+    }
+}
+
+static void rp2040_dma_dreq(void *opaque, int n, int level)
+{
+    RP2040DmaState *s = opaque;
+
+    if (!level || n < 0 || n >= RP2040_DMA_NUM_DREQS) {
+        return;
+    }
+
+    if (s->pending_dreq[n] != UINT32_MAX) {
+        s->pending_dreq[n]++;
+    }
+    qemu_bh_schedule(s->dreq_bh);
+}
+
+static void rp2040_dma_dreq_bh(void *opaque)
+{
+    RP2040DmaState *s = opaque;
+    int i;
+    int dreq;
+
+    for (dreq = 0; dreq < RP2040_DMA_NUM_DREQS; dreq++) {
+        while (s->pending_dreq[dreq] > 0) {
+            s->pending_dreq[dreq]--;
+            for (i = 0; i < RP2040_DMA_NUM_CHANNELS; i++) {
+                RP2040DmaChannel *ch = &s->chan[i];
+
+                if ((ch->ctrl & DMA_CTRL_BUSY) && rp2040_dma_treq(ch) == dreq) {
+                    rp2040_dma_run_beats(s, i, 1, 0);
+                }
+            }
+        }
     }
 }
 
@@ -470,6 +548,7 @@ static void rp2040_dma_reset(DeviceState *dev)
         s->chan[i].trans_count = 0;
         s->chan[i].reload_count = 0;
         s->chan[i].ctrl = i << DMA_CTRL_CHAIN_TO_SHIFT;
+        s->chan[i].paced_nyi_logged = false;
     }
     s->intr = 0;
     s->inte[0] = 0;
@@ -477,6 +556,8 @@ static void rp2040_dma_reset(DeviceState *dev)
     s->intf[0] = 0;
     s->intf[1] = 0;
     memset(s->timer, 0, sizeof(s->timer));
+    memset(s->pending_dreq, 0, sizeof(s->pending_dreq));
+    qemu_bh_cancel(s->dreq_bh);
     s->sniff_ctrl = 0;
     s->sniff_data = 0;
     rp2040_dma_update_irq(s);
@@ -494,6 +575,16 @@ static void rp2040_dma_init(Object *obj)
     for (i = 0; i < RP2040_DMA_NUM_IRQS; i++) {
         sysbus_init_irq(sbd, &s->irq[i]);
     }
+    s->dreq_bh = qemu_bh_new(rp2040_dma_dreq_bh, s);
+    qdev_init_gpio_in_named(DEVICE(obj), rp2040_dma_dreq, "dreq",
+                            RP2040_DMA_NUM_DREQS);
+}
+
+static void rp2040_dma_finalize(Object *obj)
+{
+    RP2040DmaState *s = RP2040_DMA(obj);
+
+    qemu_bh_delete(s->dreq_bh);
 }
 
 static void rp2040_dma_realize(DeviceState *dev, Error **errp)
@@ -537,6 +628,7 @@ static const TypeInfo rp2040_dma_info = {
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(RP2040DmaState),
     .instance_init = rp2040_dma_init,
+    .instance_finalize = rp2040_dma_finalize,
     .class_init    = rp2040_dma_class_init,
 };
 

@@ -515,8 +515,15 @@ Current SDK compatibility note:
   for memset-like transfers: fixed read address plus incrementing write
   address.
 - [x] Implement `DREQ_FORCE` as an immediate transfer trigger.
-- [x] Treat non-`DREQ_FORCE` paced transfers as immediately ready and log the
-  limitation through the shared RP2040 NYI helper.
+- [x] Keep `DREQ_FORCE` as an immediate full-transfer trigger.
+- [x] Add a generic DMA DREQ input path so peripherals can advance paced
+  channels without knowing which channel is listening to a given DREQ.
+- [x] Connect the current XIP/SSI flash model to `DREQ_XIP_SSIRX`; keep
+  `DREQ_XIP_SSITX` as an always-ready sink while the SSI TX FIFO is shallow.
+- [ ] Connect UART0 TX/RX DREQs through a small RP2040 UART wrapper or a
+  carefully scoped PL011 DREQ extension.
+- [ ] Implement DMA timer DREQs with virtual-time scheduling owned by the DMA
+  timer source, not by host realtime sleeps.
 - [x] Expose `INTR`, `INTE0/1`, `INTF0/1`, `INTS0/1`, and wire DMA IRQ0/IRQ1
   to RP2040 IRQ lines 11/12.
 - [x] Keep synthetic ROM `memcpy`/`memset` as CPU-loop helpers for now, rather
@@ -527,8 +534,9 @@ Current SDK compatibility note:
   the boot ROM table supports enough SDK default helper/data lookups. The test
   validates SDK `hardware_dma` copy and fill transfers against the QEMU DMA
   model and remains outside Git.
-- [ ] Implement or document remaining DMA features: paced DREQ timing, ring
-  wrapping, sniff checksum, abort latency, and error reporting fidelity.
+- [ ] Implement or document remaining DMA features: UART paced DREQs, DMA
+  timer paced DREQs, ring wrapping, sniff checksum, abort latency, and error
+  reporting fidelity.
 
 ## Phase 15c: SDK Flash Safe Execute and Multicore Lockout
 
