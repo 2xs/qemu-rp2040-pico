@@ -156,6 +156,7 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
                                      unsigned chain_depth);
 static void rp2040_dma_dreq(void *opaque, int n, int level);
 static void rp2040_dma_dreq_pulse(RP2040DmaState *s, uint32_t dreq);
+static void rp2040_dma_dreq_bh(void *opaque);
 static bool rp2040_dma_dreq_has_busy_channel(RP2040DmaState *s, uint32_t dreq,
                                              unsigned except);
 
@@ -175,7 +176,8 @@ static bool rp2040_dma_treq_is_ready_sink(uint32_t treq)
 
 static bool rp2040_dma_treq_is_connected_level(uint32_t treq)
 {
-    return treq == RP2040_DREQ_UART0_TX || treq == RP2040_DREQ_UART0_RX;
+    return treq == RP2040_DREQ_UART0_TX || treq == RP2040_DREQ_UART0_RX ||
+           treq == RP2040_DREQ_UART1_TX || treq == RP2040_DREQ_UART1_RX;
 }
 
 static bool rp2040_dma_treq_is_timer(uint32_t treq)
@@ -525,6 +527,9 @@ static void rp2040_dma_dreq(void *opaque, int n, int level)
     s->dreq_level[n] = level;
     if (level) {
         rp2040_dma_dreq_pulse(s, n);
+        if (rp2040_dma_treq_is_connected_level(n)) {
+            rp2040_dma_dreq_bh(s);
+        }
     }
 }
 
@@ -534,6 +539,11 @@ static void rp2040_dma_dreq_bh(void *opaque)
     int i;
     int dreq;
 
+    if (s->dreq_servicing) {
+        return;
+    }
+
+    s->dreq_servicing = true;
     for (dreq = 0; dreq < RP2040_DMA_NUM_DREQS; dreq++) {
         while (s->pending_dreq[dreq] > 0) {
             s->pending_dreq[dreq]--;
@@ -551,6 +561,7 @@ static void rp2040_dma_dreq_bh(void *opaque)
             }
         }
     }
+    s->dreq_servicing = false;
 }
 
 static bool rp2040_dma_dreq_has_busy_channel(RP2040DmaState *s, uint32_t dreq,

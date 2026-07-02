@@ -61,6 +61,7 @@ struct RP2040State {
 
     ARMv7MState armv7m[RP2040_NUM_CORES];
     PL011State uart0;
+    PL011State uart1;
     RP2040ClocksState clocks;
     RP2040DmaState dma;
     RP2040IoBank0State iobank0;
@@ -103,6 +104,8 @@ struct RP2040State {
     bool strict_uart_pins;
     bool uart0_tx_pin_enabled;
     bool uart0_rx_pin_enabled;
+    bool uart1_tx_pin_enabled;
+    bool uart1_rx_pin_enabled;
     uint32_t synthetic_rom_dbg_arg[4];
     uint32_t synthetic_rom_dbg_result[4];
     uint32_t synthetic_rom_flash_helper_count[

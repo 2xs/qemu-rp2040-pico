@@ -23,6 +23,8 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040DmaState, RP2040_DMA)
 
 #define RP2040_DREQ_UART0_TX 20
 #define RP2040_DREQ_UART0_RX 21
+#define RP2040_DREQ_UART1_TX 22
+#define RP2040_DREQ_UART1_RX 23
 #define RP2040_DREQ_XIP_SSITX 38
 #define RP2040_DREQ_XIP_SSIRX 39
 #define RP2040_DREQ_DMA_TIMER0 59
@@ -64,6 +66,7 @@ struct RP2040DmaState {
     uint32_t sniff_ctrl;
     uint32_t sniff_data;
     QEMUBH *dreq_bh;
+    bool dreq_servicing;
     bool dreq_level[RP2040_DMA_NUM_DREQS];
     uint32_t pending_dreq[RP2040_DMA_NUM_DREQS];
 };

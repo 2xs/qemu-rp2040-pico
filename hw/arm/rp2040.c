@@ -26,6 +26,8 @@
 
 #define RP2040_UART0_BASE 0x40034000
 #define RP2040_UART0_IRQ  20
+#define RP2040_UART1_BASE 0x40038000
+#define RP2040_UART1_IRQ  21
 #define RP2040_DMA_IRQ_0  11
 #define RP2040_DMA_IRQ_1  12
 #define RP2040_IO_IRQ_BANK0 13
@@ -254,7 +256,6 @@ static const struct {
     hwaddr size;
 } rp2040_unimplemented[] = {
     { "rp2040.busctrl",  0x40030000, 0x4000 },
-    { "rp2040.uart1",    0x40038000, 0x4000 },
     { "rp2040.spi0",     0x4003c000, 0x4000 },
     { "rp2040.spi1",     0x40040000, 0x4000 },
     { "rp2040.i2c0",     0x40044000, 0x4000 },
@@ -1468,6 +1469,12 @@ static void rp2040_update_uart_pins(RP2040State *s)
     pl011_set_rx_connected(&s->uart0,
                            !s->strict_uart_pins ||
                            s->uart0_rx_pin_enabled);
+    pl011_set_tx_connected(&s->uart1,
+                           !s->strict_uart_pins ||
+                           s->uart1_tx_pin_enabled);
+    pl011_set_rx_connected(&s->uart1,
+                           !s->strict_uart_pins ||
+                           s->uart1_rx_pin_enabled);
 }
 
 static void rp2040_set_uart_pin(void *opaque, int pin, int level)
@@ -1480,6 +1487,12 @@ static void rp2040_set_uart_pin(void *opaque, int pin, int level)
         break;
     case 1:
         s->uart0_rx_pin_enabled = level;
+        break;
+    case 2:
+        s->uart1_tx_pin_enabled = level;
+        break;
+    case 3:
+        s->uart1_rx_pin_enabled = level;
         break;
     default:
         g_assert_not_reached();
@@ -1570,6 +1583,8 @@ static void rp2040_soc_init(Object *obj)
     }
     object_initialize_child(obj, "uart0", &s->uart0, TYPE_PL011);
     object_property_add_alias(obj, "serial0", OBJECT(&s->uart0), "chardev");
+    object_initialize_child(obj, "uart1", &s->uart1, TYPE_PL011);
+    object_property_add_alias(obj, "serial1", OBJECT(&s->uart1), "chardev");
 
     object_initialize_child(obj, "xip", &s->xip, TYPE_RP2040_XIP);
     object_initialize_child(obj, "clocks", &s->clocks, TYPE_RP2040_CLOCKS);
@@ -1702,6 +1717,10 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
                                 qemu_allocate_irq(rp2040_set_uart_pin, s, 0));
     qdev_connect_gpio_out_named(DEVICE(&s->iobank0), "uart0-pin", 1,
                                 qemu_allocate_irq(rp2040_set_uart_pin, s, 1));
+    qdev_connect_gpio_out_named(DEVICE(&s->iobank0), "uart1-pin", 0,
+                                qemu_allocate_irq(rp2040_set_uart_pin, s, 2));
+    qdev_connect_gpio_out_named(DEVICE(&s->iobank0), "uart1-pin", 1,
+                                qemu_allocate_irq(rp2040_set_uart_pin, s, 3));
 
     object_property_set_link(OBJECT(&s->ioqspi), "xip", OBJECT(&s->xip),
                              &error_abort);
@@ -1914,7 +1933,6 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->uart0), errp)) {
         return;
     }
-    rp2040_update_uart_pins(s);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart0), 0, RP2040_UART0_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart0), 1, RP2040_UART0_BASE + 0x1000);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart0), 0, s->irq[RP2040_UART0_IRQ]);
@@ -1926,6 +1944,24 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
                                 qdev_get_gpio_in_named(DEVICE(&s->dma),
                                                        "dreq",
                                                        RP2040_DREQ_UART0_RX));
+
+    qdev_connect_clock_in(DEVICE(&s->uart1), "clk",
+                          qdev_get_clock_out(DEVICE(&s->clocks), "clk-peri"));
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->uart1), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart1), 0, RP2040_UART1_BASE);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart1), 1, RP2040_UART1_BASE + 0x1000);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart1), 0, s->irq[RP2040_UART1_IRQ]);
+    qdev_connect_gpio_out_named(DEVICE(&s->uart1), "dreq-tx", 0,
+                                qdev_get_gpio_in_named(DEVICE(&s->dma),
+                                                       "dreq",
+                                                       RP2040_DREQ_UART1_TX));
+    qdev_connect_gpio_out_named(DEVICE(&s->uart1), "dreq-rx", 0,
+                                qdev_get_gpio_in_named(DEVICE(&s->dma),
+                                                       "dreq",
+                                                       RP2040_DREQ_UART1_RX));
+    rp2040_update_uart_pins(s);
 }
 
 static const Property rp2040_soc_properties[] = {
