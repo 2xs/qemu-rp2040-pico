@@ -26,8 +26,9 @@ Supported devices
 -----------------
 
  * Two Cortex-M0+ cores. With QEMU's synthetic ROM, core 1 starts in ROM and
-   waits for the SDK FIFO launch sequence; with an external ROM image, core 1
-   is currently kept powered off.
+   waits for the SDK FIFO launch sequence. With an external ROM image,
+   ``PSM.FRCE_OFF.PROC1`` can power core 1 on at the ROM reset vector, and the
+   local Pico SDK smoke tests cover this path with ``pipico.rom``.
  * 16 KiB boot ROM window
  * 264 KiB SRAM
  * 2 MiB external flash contents mapped through the XIP window
@@ -125,20 +126,19 @@ synthetic ROM, it starts at reset, reads ``SIO_CPUID``, and waits in ROM for
 the Pico SDK FIFO sequence ``{0, 0, 1, VTOR, SP, PC}``, echoing each received
 word.  After a valid sequence, the synthetic ROM installs the supplied
 ``VTOR`` and main stack pointer, then branches to the supplied entry point.
-With an external ROM image, proc1 remains powered off until the faithful core1
-ROM path is modeled.
+With an external ROM image, proc1 is initially powered off and is started
+through the modeled ``PSM.FRCE_OFF.PROC1`` path at the ROM reset vector.
 ``PSM`` exposes the force-on, force-off, watchdog-select and done registers
 touched by the Pico SDK core1 reset path; ``FRCE_OFF_PROC1`` is stored,
 reflected in ``DONE``, and used to hold or release proc1.  The SIO divider and
-interpolator datapaths remain future work.
+inter-core FIFO paths are implemented; SIO interpolators remain future work.
 
 A local Pico SDK smoke test using ``multicore_launch_core1()`` has been used
-to validate this synthetic ROM core1 launch path.  That SDK build is configured
-to use compiler implementations for bit, memory, float and double helpers,
-because the synthetic ROM does not yet expose the RP2040 boot ROM function
-table ABI.  The in-tree functional tests keep the resulting coverage
-self-contained by reproducing the SDK FIFO launch sequence without depending
-on the SDK.
+to validate this synthetic ROM core1 launch path.  Additional local SDK smoke
+tests cover boot ROM bit/memory/float/double helper lookups, DMA copy/fill
+transfers, and flash-safe multicore execution.  The in-tree functional tests
+keep the resulting coverage self-contained by reproducing the relevant SDK
+sequences without depending on the SDK.
 
 Clock and XOSC model
 --------------------
@@ -388,8 +388,10 @@ Known limitations
 
  * Core 0 runs normally.  Core 1 starts in the synthetic ROM, echoes the
    SDK-compatible FIFO launch sequence, installs the provided ``VTOR``/stack,
-   and branches to the provided entry point.  When an external mask ROM is
-   supplied, core 1 is kept powered off until that ROM path is modeled.
+   and branches to the provided entry point.  With an external mask ROM,
+   ``PSM.FRCE_OFF.PROC1`` can start core 1 at the ROM reset vector; this path
+   is validated by local Pico SDK smoke tests with ``pipico.rom`` but is not
+   yet mirrored by an in-tree no-SDK regression.
  * UART0 currently uses QEMU's PL011 model with the RP2040 compatibility
    policy documented above.  The strict pin check currently covers the Pico
    console pins GPIO0/GPIO1 only; alternate RP2040 UART0 pin mappings remain
@@ -413,11 +415,14 @@ Known limitations
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.  The synthetic ROM supports the direct
    boot2/application launch path and the core1 FIFO launch sequence, but not
-   the RP2040 boot ROM function table used by default SDK bit/mem/float/double
-   helper implementations.
- * USB, PIO, DMA and most peripherals are not yet implemented.  USB DPRAM is
+   every RP2040 boot ROM function table entry; unsupported entries report an
+   explicit QEMU ``LOG_UNIMP`` diagnostic before faulting.
+ * USB, PIO and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
-   packet-level behavior is not modeled.
+   packet-level behavior is not modeled.  DMA has a minimal memory-to-memory
+   model for SDK copy/fill tests, including interrupt status, while paced DREQ
+   timing, ring wrapping, sniff checksum, abort latency and detailed error
+   reporting remain future work.
  * ``SYSINFO`` and ``SYSCFG`` expose the documented register layout used by
    early firmware.  ``PROC0_NMI_MASK`` is wired for interrupt sources routed
    through the RP2040 IRQ shim, currently including UART0, and
