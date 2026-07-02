@@ -1916,7 +1916,16 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     }
     rp2040_update_uart_pins(s);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart0), 0, RP2040_UART0_BASE);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->uart0), 1, RP2040_UART0_BASE + 0x1000);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->uart0), 0, s->irq[RP2040_UART0_IRQ]);
+    qdev_connect_gpio_out_named(DEVICE(&s->uart0), "dreq-tx", 0,
+                                qdev_get_gpio_in_named(DEVICE(&s->dma),
+                                                       "dreq",
+                                                       RP2040_DREQ_UART0_TX));
+    qdev_connect_gpio_out_named(DEVICE(&s->uart0), "dreq-rx", 0,
+                                qdev_get_gpio_in_named(DEVICE(&s->dma),
+                                                       "dreq",
+                                                       RP2040_DREQ_UART0_RX));
 }
 
 static const Property rp2040_soc_properties[] = {

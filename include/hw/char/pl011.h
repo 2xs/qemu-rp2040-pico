@@ -32,6 +32,7 @@ struct PL011State {
     SysBusDevice parent_obj;
 
     MemoryRegion iomem;
+    MemoryRegion atomic_alias_iomem;
     uint32_t flags;
     uint32_t lcr;
     uint32_t rsr;
@@ -49,6 +50,8 @@ struct PL011State {
     int read_trigger;
     CharFrontend chr;
     qemu_irq irq[6];
+    qemu_irq dreq_tx;
+    qemu_irq dreq_rx;
     Clock *clk;
     bool migrate_clk;
     bool tx_connected;
