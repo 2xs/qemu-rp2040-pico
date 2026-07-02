@@ -13,6 +13,7 @@
 #define DMA_CH_WRITE_ADDR       0x04
 #define DMA_CH_TRANS_COUNT      0x08
 #define DMA_CH_CTRL_TRIG        0x0c
+#define DMA_CHAN_ABORT          0x444
 
 #define DMA_CTRL_BUSY           BIT(24)
 #define DMA_CTRL_TREQ_SEL_SHIFT 15
@@ -100,6 +101,39 @@ static void test_dma_write_ring_wrap(void)
     qtest_quit(qts);
 }
 
+static void test_dma_channel_abort(void)
+{
+    QTestState *qts = rp2040_start();
+    uint32_t ctrl = DMA_CTRL_EN | DMA_CTRL_INCR_WRITE | DMA_CTRL_DATA_SIZE_8 |
+                    (DREQ_XIP_SSIRX << DMA_CTRL_TREQ_SEL_SHIFT);
+
+    qtest_writel(qts, SRAM_BASE, 0xffffffff);
+    qtest_writel(qts, DMA_BASE + DMA_CH_READ_ADDR, XIP_SSI_BASE + XIP_SSI_DR0);
+    qtest_writel(qts, DMA_BASE + DMA_CH_WRITE_ADDR, SRAM_BASE);
+    qtest_writel(qts, DMA_BASE + DMA_CH_TRANS_COUNT, 4);
+    qtest_writel(qts, DMA_BASE + DMA_CH_CTRL_TRIG, ctrl);
+
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_CTRL_TRIG) &
+                    DMA_CTRL_BUSY, ==, DMA_CTRL_BUSY);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==, 4);
+
+    qtest_writel(qts, DMA_BASE + DMA_CHAN_ABORT, BIT(0));
+
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CHAN_ABORT), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_CTRL_TRIG) &
+                    DMA_CTRL_BUSY, ==, 0);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==, 0);
+
+    qtest_writel(qts, XIP_SSI_BASE + XIP_SSI_DR0, 0x03);
+    qtest_writel(qts, XIP_SSI_BASE + XIP_SSI_DR0, 0x00);
+    qtest_writel(qts, XIP_SSI_BASE + XIP_SSI_DR0, 0x00);
+    qtest_writel(qts, XIP_SSI_BASE + XIP_SSI_DR0, 0x00);
+
+    g_assert_cmphex(qtest_readl(qts, SRAM_BASE), ==, 0xffffffff);
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -108,6 +142,8 @@ int main(int argc, char **argv)
                    test_dma_xip_ssi_rx_dreq);
     qtest_add_func("/rp2040-dma/write-ring-wrap",
                    test_dma_write_ring_wrap);
+    qtest_add_func("/rp2040-dma/channel-abort",
+                   test_dma_channel_abort);
 
     return g_test_run();
 }
