@@ -542,8 +542,12 @@ Current SDK compatibility note:
 - [x] Implement DMA sniff accumulator updates for the documented RP2040
   `CRC32`, `CRC32R`, `CRC16`, `CRC16R`, `EVEN`, and `SUM` modes, including
   read-side output reverse/invert transforms and qtest coverage for `SUM`.
-- [ ] Implement or document remaining DMA features: UART paced DREQs, DMA
-  timer paced DREQs, and error reporting fidelity.
+- [x] Improve DMA bus-error reporting: read/write errors set the documented
+  `READ_ERROR`/`WRITE_ERROR` and derived `AHB_ERROR` bits, clear `BUSY`, keep
+  the remaining transfer count, raise raw `INTR`, support `INTS0/1` write-one
+  IRQ acknowledgement, and have SDK plus qtest coverage.
+- [ ] Implement or document remaining DMA features: UART paced DREQs and DMA
+  timer paced DREQs.
 
 ## Phase 15c: SDK Flash Safe Execute and Multicore Lockout
 

@@ -419,10 +419,16 @@ Known limitations
    explicit QEMU ``LOG_UNIMP`` diagnostic before faulting.
  * USB, PIO and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
-   packet-level behavior is not modeled.  DMA has a minimal memory-to-memory
-   model for SDK copy/fill tests, including interrupt status, while paced DREQ
-   timing, ring wrapping, sniff checksum, abort latency and detailed error
-   reporting remain future work.
+   packet-level behavior is not modeled.  DMA supports memory-to-memory
+   transfers, XIP/SSI RX DREQ pacing, read/write ring wrapping, the documented
+   sniff accumulator modes, immediate channel abort, and bus-error status
+   reporting through ``CTRL_TRIG``, ``INTR`` and ``INTS0/1``.  DMA bus errors
+   are reported with the documented ``READ_ERROR`` or ``WRITE_ERROR`` plus
+   ``AHB_ERROR`` bits, clear ``BUSY``, keep the remaining transfer count, and
+   raise the raw channel interrupt.  QEMU does not model DMA pipeline latency:
+   abort status self-clears immediately, and the reported fault address is the
+   exact attempted address rather than a delayed approximate address.  UART
+   paced DREQs and DMA timer paced DREQs remain future work.
  * ``SYSINFO`` and ``SYSCFG`` expose the documented register layout used by
    early firmware.  ``PROC0_NMI_MASK`` is wired for interrupt sources routed
    through the RP2040 IRQ shim, currently including UART0, and

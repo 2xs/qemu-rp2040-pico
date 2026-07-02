@@ -13,10 +13,16 @@
 #define DMA_CH_WRITE_ADDR       0x04
 #define DMA_CH_TRANS_COUNT      0x08
 #define DMA_CH_CTRL_TRIG        0x0c
+#define DMA_INTR                0x400
+#define DMA_INTE0               0x404
+#define DMA_INTS0               0x40c
 #define DMA_SNIFF_CTRL          0x434
 #define DMA_SNIFF_DATA          0x438
 #define DMA_CHAN_ABORT          0x444
 
+#define DMA_CTRL_AHB_ERROR      BIT(31)
+#define DMA_CTRL_READ_ERROR     BIT(30)
+#define DMA_CTRL_WRITE_ERROR    BIT(29)
 #define DMA_CTRL_BUSY           BIT(24)
 #define DMA_CTRL_SNIFF_EN       BIT(23)
 #define DMA_CTRL_TREQ_SEL_SHIFT 15
@@ -26,6 +32,7 @@
 #define DMA_CTRL_INCR_WRITE     BIT(5)
 #define DMA_CTRL_INCR_READ      BIT(4)
 #define DMA_CTRL_DATA_SIZE_8    (0 << 2)
+#define DMA_CTRL_DATA_SIZE_32   (2 << 2)
 #define DMA_CTRL_EN             BIT(0)
 
 #define DMA_SNIFF_CTRL_OUT_INV  BIT(11)
@@ -40,6 +47,7 @@
 #define XIP_SSI_DR0             0x60
 
 #define SRAM_BASE               0x20000000
+#define BAD_DMA_ADDR            0x60000000
 
 static QTestState *rp2040_start(void)
 {
@@ -178,6 +186,54 @@ static void test_dma_sniff_sum(void)
     qtest_quit(qts);
 }
 
+static void test_dma_error_status(void)
+{
+    QTestState *qts = rp2040_start();
+    uint32_t ctrl = DMA_CTRL_EN | DMA_CTRL_DATA_SIZE_32 |
+                    (DREQ_FORCE << DMA_CTRL_TREQ_SEL_SHIFT);
+
+    qtest_writel(qts, SRAM_BASE, 0x12345678);
+    qtest_writel(qts, DMA_BASE + DMA_INTR, BIT(0));
+    qtest_writel(qts, DMA_BASE + DMA_INTE0, BIT(0));
+    qtest_writel(qts, DMA_BASE + DMA_CH_READ_ADDR, BAD_DMA_ADDR);
+    qtest_writel(qts, DMA_BASE + DMA_CH_WRITE_ADDR, SRAM_BASE + 4);
+    qtest_writel(qts, DMA_BASE + DMA_CH_TRANS_COUNT, 1);
+    qtest_writel(qts, DMA_BASE + DMA_CH_CTRL_TRIG, ctrl);
+
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_CTRL_TRIG) &
+                    (DMA_CTRL_AHB_ERROR | DMA_CTRL_READ_ERROR |
+                     DMA_CTRL_WRITE_ERROR | DMA_CTRL_BUSY), ==,
+                    DMA_CTRL_AHB_ERROR | DMA_CTRL_READ_ERROR);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==, 1);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_INTR), ==, BIT(0));
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_INTS0), ==, BIT(0));
+
+    qtest_writel(qts, DMA_BASE + DMA_INTS0, BIT(0));
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_INTR), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_INTS0), ==, 0);
+
+    qtest_writel(qts, DMA_BASE + DMA_CH_CTRL_TRIG,
+                 DMA_CTRL_READ_ERROR | DMA_CTRL_WRITE_ERROR);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_CTRL_TRIG) &
+                    (DMA_CTRL_AHB_ERROR | DMA_CTRL_READ_ERROR |
+                     DMA_CTRL_WRITE_ERROR), ==, 0);
+
+    qtest_writel(qts, DMA_BASE + DMA_CH_READ_ADDR, SRAM_BASE);
+    qtest_writel(qts, DMA_BASE + DMA_CH_WRITE_ADDR, BAD_DMA_ADDR);
+    qtest_writel(qts, DMA_BASE + DMA_CH_TRANS_COUNT, 1);
+    qtest_writel(qts, DMA_BASE + DMA_CH_CTRL_TRIG, ctrl);
+
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_CTRL_TRIG) &
+                    (DMA_CTRL_AHB_ERROR | DMA_CTRL_READ_ERROR |
+                     DMA_CTRL_WRITE_ERROR | DMA_CTRL_BUSY), ==,
+                    DMA_CTRL_AHB_ERROR | DMA_CTRL_WRITE_ERROR);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_CH_TRANS_COUNT), ==, 1);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_INTR), ==, BIT(0));
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_INTS0), ==, BIT(0));
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -190,6 +246,8 @@ int main(int argc, char **argv)
                    test_dma_channel_abort);
     qtest_add_func("/rp2040-dma/sniff-sum",
                    test_dma_sniff_sum);
+    qtest_add_func("/rp2040-dma/error-status",
+                   test_dma_error_status);
 
     return g_test_run();
 }
