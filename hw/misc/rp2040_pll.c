@@ -7,6 +7,7 @@
 #include "qemu/osdep.h"
 #include "hw/core/qdev-clock.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/misc/rp2040_pll.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
@@ -114,10 +115,8 @@ static uint64_t rp2040_pll_read(void *opaque, hwaddr addr, unsigned size)
         break;
     default:
         value = 0;
-        qemu_log_mask(LOG_UNIMP, "%s: unimplemented read  "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                      name, size, s->base + addr, offset, size << 1, value);
+        rp2040_log_unimplemented_read(name, size, s->base + addr, offset,
+                                      value);
         break;
     }
 
@@ -150,12 +149,8 @@ static void rp2040_pll_write(void *opaque, hwaddr addr,
                   PLL_PRIM_MASK;
         break;
     default:
-        qemu_log_mask(LOG_UNIMP, "%s: unimplemented write "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ", value 0x%0*" PRIx64 ")\n",
-                      name, size, s->base + addr, offset, size << 1,
-                      value64);
+        rp2040_log_unimplemented_write(name, size, s->base + addr, offset,
+                                       value64);
         break;
     }
 

@@ -9,5 +9,11 @@
 
 void rp2040_log_nyi(const char *component, const char *feature,
                     const char *detail);
+void rp2040_log_unimplemented_read(const char *component, unsigned size,
+                                   uint64_t addr, uint64_t offset,
+                                   uint64_t value);
+void rp2040_log_unimplemented_write(const char *component, unsigned size,
+                                    uint64_t addr, uint64_t offset,
+                                    uint64_t value);
 
 #endif

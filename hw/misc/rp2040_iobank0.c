@@ -6,6 +6,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/misc/rp2040_iobank0.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/core/irq.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
@@ -173,11 +174,9 @@ static uint64_t rp2040_iobank0_read(void *opaque, hwaddr addr, unsigned size)
                                     s->dormant_wake_intf[bank]);
     } else {
         value = 0;
-        qemu_log_mask(LOG_UNIMP, "rp2040.iobank0: unimplemented read "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                      size, RP2040_IOBANK0_BASE + addr, offset, size << 1,
-                      value);
+        rp2040_log_unimplemented_read("iobank0", size,
+                                      RP2040_IOBANK0_BASE + addr, offset,
+                                      value);
     }
 
     return value;
@@ -243,12 +242,9 @@ static void rp2040_iobank0_write(void *opaque, hwaddr addr, uint64_t value64,
                                            &bank) &&
                !rp2040_iobank0_bank_offset(offset, IOBANK0_DORMANT_INTS,
                                            &bank)) {
-        qemu_log_mask(LOG_UNIMP, "rp2040.iobank0: unimplemented write "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ", value 0x%0*" PRIx64 ")\n",
-                      size, RP2040_IOBANK0_BASE + addr, offset, size << 1,
-                      value64);
+        rp2040_log_unimplemented_write("iobank0", size,
+                                       RP2040_IOBANK0_BASE + addr, offset,
+                                       value64);
     }
 }
 

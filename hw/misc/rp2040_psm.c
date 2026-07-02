@@ -5,6 +5,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/misc/rp2040_psm.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
@@ -81,10 +82,8 @@ static uint64_t rp2040_psm_read(void *opaque, hwaddr addr, unsigned size)
         break;
     default:
         value = 0;
-        qemu_log_mask(LOG_UNIMP, "rp2040.psm: unimplemented read  "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                      size, RP2040_PSM_BASE + addr, offset, size << 1, value);
+        rp2040_log_unimplemented_read("psm", size,
+                                      RP2040_PSM_BASE + addr, offset, value);
         break;
     }
 
@@ -119,12 +118,9 @@ static void rp2040_psm_write(void *opaque, hwaddr addr,
     case PSM_DONE:
         break;
     default:
-        qemu_log_mask(LOG_UNIMP, "rp2040.psm: unimplemented write "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ", value 0x%0*" PRIx64 ")\n",
-                      size, RP2040_PSM_BASE + addr, offset, size << 1,
-                      value64);
+        rp2040_log_unimplemented_write("psm", size,
+                                       RP2040_PSM_BASE + addr, offset,
+                                       value64);
         break;
     }
 }

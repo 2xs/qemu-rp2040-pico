@@ -6,6 +6,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/core/qdev-clock.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/misc/rp2040_rosc.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
@@ -184,11 +185,9 @@ static uint64_t rp2040_rosc_read(void *opaque, hwaddr addr, unsigned size)
         break;
     default:
         value = 0;
-        qemu_log_mask(LOG_UNIMP, "rp2040.rosc: unimplemented read  "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                      size, RP2040_ROSC_BASE + addr, offset, size << 1,
-                      value);
+        rp2040_log_unimplemented_read("rosc", size,
+                                      RP2040_ROSC_BASE + addr, offset,
+                                      value);
         break;
     }
 
@@ -294,12 +293,9 @@ static void rp2040_rosc_write(void *opaque, hwaddr addr,
         s->count_start_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
         break;
     default:
-        qemu_log_mask(LOG_UNIMP, "rp2040.rosc: unimplemented write "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ", value 0x%0*" PRIx64 ")\n",
-                      size, RP2040_ROSC_BASE + addr, offset, size << 1,
-                      value64);
+        rp2040_log_unimplemented_write("rosc", size,
+                                       RP2040_ROSC_BASE + addr, offset,
+                                       value64);
         break;
     }
 }

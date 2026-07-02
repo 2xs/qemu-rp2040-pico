@@ -501,7 +501,7 @@ Current SDK compatibility note:
   fixed-point conversions, and transcendental functions. The synthetic ROM
   still delegates the actual work to QEMU-side helpers rather than reproducing
   the RP2040 mask ROM algorithms instruction-for-instruction.
-- [ ] Convert shallow RP2040 peripheral models to use the shared NYI helper for
+- [x] Convert shallow RP2040 peripheral models to use the shared NYI helper for
   unimplemented-but-visible register behavior.
 
 ## Phase 15b: Minimal RP2040 DMA

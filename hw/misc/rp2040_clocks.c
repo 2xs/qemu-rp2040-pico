@@ -7,6 +7,7 @@
 #include "qemu/osdep.h"
 #include "hw/core/qdev-clock.h"
 #include "hw/misc/rp2040_clocks.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
@@ -223,11 +224,9 @@ static uint64_t rp2040_clocks_read(void *opaque, hwaddr addr, unsigned size)
 
     if (offset >= sizeof(s->regs)) {
         value = 0;
-        qemu_log_mask(LOG_UNIMP, "rp2040.clocks: unimplemented read  "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                      size, RP2040_CLOCKS_BASE + addr, offset, size << 1,
-                      value);
+        rp2040_log_unimplemented_read("clocks", size,
+                                      RP2040_CLOCKS_BASE + addr, offset,
+                                      value);
     } else if (rp2040_clocks_is_selected(offset)) {
         value = rp2040_clocks_selected(s, offset);
     } else {
@@ -289,12 +288,9 @@ static void rp2040_clocks_write(void *opaque, hwaddr addr,
             break;
         }
     } else if (offset >= sizeof(s->regs)) {
-        qemu_log_mask(LOG_UNIMP, "rp2040.clocks: unimplemented write "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ", value 0x%0*" PRIx64 ")\n",
-                      size, RP2040_CLOCKS_BASE + addr, offset,
-                      size << 1, value);
+        rp2040_log_unimplemented_write("clocks", size,
+                                       RP2040_CLOCKS_BASE + addr, offset,
+                                       value);
     }
 }
 
