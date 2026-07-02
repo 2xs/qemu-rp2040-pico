@@ -25,6 +25,7 @@ struct RP2040IoBank0State {
     qemu_irq proc0_irq;
     qemu_irq proc1_irq;
     qemu_irq uart0_pin[2];
+    qemu_irq uart1_pin[2];
 
     uint32_t ctrl[RP2040_IOBANK0_NUM_GPIOS];
     uint32_t intr[RP2040_IOBANK0_IRQ_BANKS];
@@ -38,5 +39,7 @@ struct RP2040IoBank0State {
 
 bool rp2040_iobank0_uart0_tx_enabled(RP2040IoBank0State *s);
 bool rp2040_iobank0_uart0_rx_enabled(RP2040IoBank0State *s);
+bool rp2040_iobank0_uart1_tx_enabled(RP2040IoBank0State *s);
+bool rp2040_iobank0_uart1_rx_enabled(RP2040IoBank0State *s);
 
 #endif

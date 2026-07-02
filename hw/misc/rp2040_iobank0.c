@@ -111,10 +111,22 @@ bool rp2040_iobank0_uart0_rx_enabled(RP2040IoBank0State *s)
     return rp2040_iobank0_gpio_is_uart(s, 1);
 }
 
+bool rp2040_iobank0_uart1_tx_enabled(RP2040IoBank0State *s)
+{
+    return rp2040_iobank0_gpio_is_uart(s, 4);
+}
+
+bool rp2040_iobank0_uart1_rx_enabled(RP2040IoBank0State *s)
+{
+    return rp2040_iobank0_gpio_is_uart(s, 5);
+}
+
 static void rp2040_iobank0_update_uart_pins(RP2040IoBank0State *s)
 {
     qemu_set_irq(s->uart0_pin[0], rp2040_iobank0_uart0_tx_enabled(s));
     qemu_set_irq(s->uart0_pin[1], rp2040_iobank0_uart0_rx_enabled(s));
+    qemu_set_irq(s->uart1_pin[0], rp2040_iobank0_uart1_tx_enabled(s));
+    qemu_set_irq(s->uart1_pin[1], rp2040_iobank0_uart1_rx_enabled(s));
 }
 
 static void rp2040_iobank0_update_irq(RP2040IoBank0State *s)
@@ -205,7 +217,7 @@ static void rp2040_iobank0_write(void *opaque, hwaddr addr, uint64_t value64,
             s->ctrl[gpio] =
                 rp2040_iobank0_apply_alias(s->ctrl[gpio], value, alias) &
                 IOBANK0_CTRL_RW_MASK;
-            if (gpio <= 1) {
+            if (gpio <= 1 || gpio == 4 || gpio == 5) {
                 rp2040_iobank0_update_uart_pins(s);
             }
         }
@@ -289,6 +301,8 @@ static void rp2040_iobank0_init(Object *obj)
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->proc1_irq);
     qdev_init_gpio_out_named(DEVICE(obj), s->uart0_pin, "uart0-pin",
                              ARRAY_SIZE(s->uart0_pin));
+    qdev_init_gpio_out_named(DEVICE(obj), s->uart1_pin, "uart1-pin",
+                             ARRAY_SIZE(s->uart1_pin));
 }
 
 static const VMStateDescription rp2040_iobank0_vmstate = {

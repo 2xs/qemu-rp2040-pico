@@ -342,7 +342,7 @@ and HardFault behaviour on pages 71 to 72.  This is an emulation policy chosen
 to make incorrect execute-from-XIP-while-programming behaviour visible and
 testable.  It is not intended to model precise flash timing.
 
-UART0 model
+UART models
 -----------
 
 The RP2040 datasheet states that each UART instance is based on ARM PrimeCell
@@ -350,23 +350,23 @@ UART PL011 revision r1p5, with 32-byte transmit and receive FIFOs.  It also
 states that PL011 modem mode and IrDA mode are not supported by RP2040.  See
 datasheet pages 417 to 419.
 
-The current QEMU model therefore wires UART0 at ``0x40034000`` to QEMU's
-existing PL011 device.  The register list and flag register layout match the
-RP2040 UART programmer's model: ``UARTDR`` is at offset ``0x000``,
-``UARTRSR/UARTECR`` at ``0x004`` and ``UARTFR`` at ``0x018``.  See datasheet
-pages 429 to 431.
+The current QEMU model therefore wires UART0 at ``0x40034000`` and UART1 at
+``0x40038000`` to QEMU's existing PL011 device.  The register list and flag
+register layout match the RP2040 UART programmer's model: ``UARTDR`` is at
+offset ``0x000``, ``UARTRSR/UARTECR`` at ``0x004`` and ``UARTFR`` at
+``0x018``.  See datasheet pages 429 to 431.
 
-The RP2040 APB atomic alias windows for UART0 are also mapped, because the
-Pico SDK uses them when configuring UART registers.  ``UARTDMACR`` drives
-UART0 TX/RX DREQ lines into the RP2040 DMA model.
+The RP2040 APB atomic alias windows for both UARTs are also mapped, because
+the Pico SDK uses them when configuring UART registers.  ``UARTDMACR`` drives
+UART0 and UART1 TX/RX DREQ lines into the RP2040 DMA model.
 
 The console path uses QEMU's standard serial backends, so the host side can
 still be selected with the usual ``-serial`` or ``-chardev`` options.  By
-default, the Pico machine requires the guest to route UART0 through
-``IO_BANK0`` first: GPIO0 must have ``FUNCSEL=UART`` before UART0 transmit
-data reaches the host serial backend, and GPIO1 must have ``FUNCSEL=UART``
-before host serial input reaches UART0 receive data.  This catches firmware
-that writes UART0 registers but forgets the Pico GPIO function select.
+default, the Pico machine requires the guest to route UARTs through
+``IO_BANK0`` first: GPIO0/GPIO1 must have ``FUNCSEL=UART`` before UART0 host
+serial transmit/receive is connected, and GPIO4/GPIO5 do the same for UART1.
+This catches firmware that writes UART registers but forgets the Pico GPIO
+function select.
 
 For compatibility with very small bring-up payloads, this check can be
 disabled with ``-machine raspi-pico,strict-uart-pins=off``.  ``PADS_BANK0``
@@ -396,14 +396,15 @@ Known limitations
    ``PSM.FRCE_OFF.PROC1`` can start core 1 at the ROM reset vector; this path
    is validated by local Pico SDK smoke tests with ``pipico.rom`` but is not
    yet mirrored by an in-tree no-SDK regression.
- * UART0 currently uses QEMU's PL011 model with the RP2040 compatibility
+ * UART0 and UART1 currently use QEMU's PL011 model with the RP2040 compatibility
    policy documented above.  The strict pin check currently covers the Pico
-   console pins GPIO0/GPIO1 only; alternate RP2040 UART0 pin mappings remain
-   future work.
+   GPIO0/GPIO1 UART0 path and GPIO4/GPIO5 UART1 path only; alternate RP2040
+   UART pin mappings remain future work.
  * ``IO_BANK0`` stores GPIO function-select, override and interrupt registers,
-   implements RP2040 atomic aliases, and gates UART0 host serial I/O for the
-   GPIO0/GPIO1 console path.  It does not yet route other SIO/peripheral
-   signal paths, and it does not model pad input levels or edge detection.
+   implements RP2040 atomic aliases, and gates UART host serial I/O for the
+   GPIO0/GPIO1 UART0 path and GPIO4/GPIO5 UART1 path.  It does not yet route
+   other SIO/peripheral signal paths, and it does not model pad input levels or
+   edge detection.
  * ``PADS_BANK0`` and ``PADS_QSPI`` store documented pad-control registers and
    implement RP2040 atomic aliases.  They do not model electrical pad
    behaviour and do not currently gate UART or XIP operation.
@@ -424,11 +425,11 @@ Known limitations
  * USB, PIO and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.  DMA supports memory-to-memory
-   transfers, XIP/SSI RX DREQ pacing, UART0 TX/RX DREQ pacing, DMA timer
+   transfers, XIP/SSI RX DREQ pacing, UART0/UART1 TX/RX DREQ pacing, DMA timer
    pacing from QEMU virtual time, read/write ring wrapping, the documented
    sniff accumulator modes, immediate channel abort, and bus-error status
-   reporting through ``CTRL_TRIG``, ``INTR`` and ``INTS0/1``.  UART0 DREQs are
-   exposed through the current PL011-backed UART model and follow the PL011
+   reporting through ``CTRL_TRIG``, ``INTR`` and ``INTS0/1``.  UART DREQs are
+   exposed through the current PL011-backed UART models and follow the PL011
    FIFO occupancy plus ``UARTDMACR`` enable bits; fine-grained UART timing is
    not modeled.  DMA timer pacing uses the documented ``X/Y`` fractional timer
    registers and the Pico's nominal 125 MHz system clock as the virtual source.

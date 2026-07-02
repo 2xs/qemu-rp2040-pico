@@ -546,8 +546,9 @@ Current SDK compatibility note:
   `READ_ERROR`/`WRITE_ERROR` and derived `AHB_ERROR` bits, clear `BUSY`, keep
   the remaining transfer count, raise raw `INTR`, support `INTS0/1` write-one
   IRQ acknowledgement, and have SDK plus qtest coverage.
-- [x] Implement UART paced DREQs for UART0 TX/RX and validate them with a
-  no-SDK functional test plus an SDK `hardware_uart`/`hardware_dma` smoke test.
+- [x] Implement UART paced DREQs for UART0/UART1 TX/RX, validate both with
+  no-SDK functional tests, and keep the SDK `hardware_uart`/`hardware_dma`
+  smoke path for the PL011-backed UART/DMA model.
 
 ## Phase 15c: SDK Flash Safe Execute and Multicore Lockout
 

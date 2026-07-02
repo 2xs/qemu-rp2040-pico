@@ -54,6 +54,7 @@ static void raspi_pico_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "soc", &s->soc, TYPE_RP2040);
     qdev_prop_set_chr(DEVICE(&s->soc), "serial0", serial_hd(0));
+    qdev_prop_set_chr(DEVICE(&s->soc), "serial1", serial_hd(1));
     qdev_prop_set_bit(DEVICE(&s->soc), "strict-uart-pins",
                       s->strict_uart_pins);
     /*

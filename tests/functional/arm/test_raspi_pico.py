@@ -420,20 +420,39 @@ class RaspiPicoMachine(QemuSystemTest):
     # UART0 RX DREQ, waits for DMA IRQ0 again, verifies the bytes in SRAM, and
     # sends the success string through UART0 TX DREQ.
     DMA_UART_TEST_BIN = bytes.fromhex(
-        '0020042071000010230100102301001000000000000000000000000000000000'
-        '0000000000000000000000002301001000000000000000002301001023010010'
-        '2301001023010010230100102301001023010010230100102301001023010010'
-        '2301001023010010230100101701001072b63948394901630321816438483949'
-        '016062b638480f2100f019f83748052100f023f835483649052203780c78'
-        'a34208d101300131013af7d132480c2100f006f836e030480e2100f001f8'
-        '31e010b50c4600f018f82d4a1060234b536094602b4bd36000f018f810bd'
-        '10b50c4600f00af8264a1c4b136050609460254bd36000f00af810bd'
-        '244a00231360234a01231360234a136070471f4a30bf136801242342'
-        'fad070471d48016801601a480160704730bffde7c046444d41205541'
-        '52542054524143450a48454c4c4f444d412055415254204f4b0a'
-        '444d412055415254204641494c0a0000004003400103000000e100e0'
-        '000800002801001010000020370100103c0100104801001000000050'
-        '11000a0021800a00000000200004005004040050'
+        '0020042071000010350100103501001000000000000000000000000000000000'
+        '0000000000000000000000003501001000000000000000003501001035010010'
+        '3501001035010010350100103501001035010010350100103501001035010010'
+        '3501001035010010350100102901001072b63d481021c1623c49016303218164'
+        '3b493c480022d24302603b4802603b48016062b63a480f2100f019f839480521'
+        '00f023f837483849052203780c78a34208d101300131013af7d134480c2100f0'
+        '06f837e032480e2100f001f832e010b50c4600f018f82f4a1060234b53609460'
+        '2d4bd36000f018f810bd10b50c4600f00af8284a1c4b136050609460274bd360'
+        '00f00af810bd264a00231360254a01231360254a13607047214a136801242342'
+        '01d130bff9d070471e48016801601c480160704730bffde7444d412055415254'
+        '2054524143450a48454c4c4f444d412055415254204f4b0a444d412055415254'
+        '204641494c0a000000400340010300000008000080e100e080e200e000e100e0'
+        '3801001010000020470100104c010010580100100000005011000a0021800a00'
+        '000000200004005004040050'
+    )
+
+    # Same UART paced DMA test as DMA_UART_TEST_BIN, but using UART1 at
+    # 0x40038000 and DREQ_UART1_TX/RX.
+    DMA_UART1_TEST_BIN = bytes.fromhex(
+        '0020042071000010350100103501001000000000000000000000000000000000'
+        '0000000000000000000000003501001000000000000000003501001035010010'
+        '3501001035010010350100103501001035010010350100103501001035010010'
+        '3501001035010010350100102901001072b63e481021c1623d49016303218164'
+        '3c493d480022d24302603c4802603c48016062b63b48102100f019f83a480521'
+        '00f023f838483949052203780c78a34208d101300131013af7d135480d2100f0'
+        '06f837e033480f2100f001f832e010b50c4600f018f8304a1060244b53609460'
+        '2e4bd36000f018f810bd10b50c4600f00af8294a1d4b136050609460284bd360'
+        '00f00af810bd274a00231360264a01231360264a13607047224a136801242342'
+        '01d130bff9d070471f48016801601d480160704730bffde7444d412055415254'
+        '312054524143450a48454c4c4f444d41205541525431204f4b0a444d41205541'
+        '525431204641494c0a00000000800340010300000008000080e100e080e200e0'
+        '00e100e03801001010000020480100104d0100105a0100100000005011000b00'
+        '21800b00000000200004005004040050'
     )
 
     BOOT2_W25Q080_BIN = bytes.fromhex(
@@ -979,7 +998,7 @@ class RaspiPicoMachine(QemuSystemTest):
         try:
             while b'DMA UART TRACE' not in data:
                 data += guest_sock.recv(1)
-            time.sleep(2.0)
+            time.sleep(5.0)
             guest_sock.sendall(b'HELLO\r')
             while b'DMA UART OK' not in data:
                 data += guest_sock.recv(1)
@@ -988,6 +1007,39 @@ class RaspiPicoMachine(QemuSystemTest):
             qemu.wait(timeout=2)
             guest_sock.close()
         self.assertIn(b'DMA UART OK', data)
+
+    def test_dma_uart1_tx_rx(self):
+        image = self.scratch_file('dma-uart1-test.bin')
+        with open(image, 'wb') as image_file:
+            image_file.write(self.make_bootable_image(self.DMA_UART1_TEST_BIN))
+
+        guest_sock, qemu_sock = socket.socketpair()
+        os.set_inheritable(qemu_sock.fileno(), True)
+        qemu = subprocess.Popen([
+            self.qemu_bin,
+            '-machine', 'raspi-pico,strict-uart-pins=off',
+            '-kernel', image,
+            '-serial', 'null',
+            '-chardev', f'socket,id=uart1,fd={qemu_sock.fileno()}',
+            '-serial', 'chardev:uart1',
+            '-display', 'none',
+        ], cwd=os.path.dirname(os.getenv('MESON_BUILD_ROOT')),
+           pass_fds=(qemu_sock.fileno(),))
+        qemu_sock.close()
+        guest_sock.settimeout(10)
+        data = b''
+        try:
+            while b'DMA UART1 TRACE' not in data:
+                data += guest_sock.recv(1)
+            time.sleep(5.0)
+            guest_sock.sendall(b'HELLO\r')
+            while b'DMA UART1 OK' not in data:
+                data += guest_sock.recv(1)
+        finally:
+            qemu.terminate()
+            qemu.wait(timeout=2)
+            guest_sock.close()
+        self.assertIn(b'DMA UART1 OK', data)
 
     def test_flash_file_uart0(self):
         flash = self.scratch_file('flash.bin')
