@@ -5,6 +5,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/misc/rp2040_pads.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
@@ -93,13 +94,9 @@ static uint64_t rp2040_pads_bank0_read(void *opaque, hwaddr addr,
             value = s->gpio[index];
         } else {
             value = 0;
-            qemu_log_mask(LOG_UNIMP, "rp2040.padsbank0: "
-                          "unimplemented read  "
-                          "(size %d, addr 0x%08" HWADDR_PRIx
-                          ", offset 0x%04" HWADDR_PRIx
-                          ") -> 0x%0*" PRIx64 "\n",
-                          size, RP2040_PADS_BANK0_BASE + addr, offset,
-                          size << 1, value);
+            rp2040_log_unimplemented_read("padsbank0", size,
+                                          RP2040_PADS_BANK0_BASE + addr,
+                                          offset, value);
         }
         break;
     }
@@ -135,13 +132,9 @@ static void rp2040_pads_bank0_write(void *opaque, hwaddr addr,
             s->gpio[index] = rp2040_pads_apply_alias(s->gpio[index], value,
                                                      alias) & PADS_PAD_MASK;
         } else {
-            qemu_log_mask(LOG_UNIMP, "rp2040.padsbank0: "
-                          "unimplemented write "
-                          "(size %d, addr 0x%08" HWADDR_PRIx
-                          ", offset 0x%04" HWADDR_PRIx
-                          ", value 0x%0*" PRIx64 ")\n",
-                          size, RP2040_PADS_BANK0_BASE + addr, offset,
-                          size << 1, value64);
+            rp2040_log_unimplemented_write("padsbank0", size,
+                                           RP2040_PADS_BANK0_BASE + addr,
+                                           offset, value64);
         }
         break;
     }
@@ -164,13 +157,9 @@ static uint64_t rp2040_pads_qspi_read(void *opaque, hwaddr addr,
             value = s->pad[index];
         } else {
             value = 0;
-            qemu_log_mask(LOG_UNIMP, "rp2040.padsqspi: "
-                          "unimplemented read  "
-                          "(size %d, addr 0x%08" HWADDR_PRIx
-                          ", offset 0x%04" HWADDR_PRIx
-                          ") -> 0x%0*" PRIx64 "\n",
-                          size, RP2040_PADS_QSPI_BASE + addr, offset,
-                          size << 1, value);
+            rp2040_log_unimplemented_read("padsqspi", size,
+                                          RP2040_PADS_QSPI_BASE + addr,
+                                          offset, value);
         }
         break;
     }
@@ -198,13 +187,9 @@ static void rp2040_pads_qspi_write(void *opaque, hwaddr addr,
             s->pad[index] = rp2040_pads_apply_alias(s->pad[index], value,
                                                     alias) & PADS_PAD_MASK;
         } else {
-            qemu_log_mask(LOG_UNIMP, "rp2040.padsqspi: "
-                          "unimplemented write "
-                          "(size %d, addr 0x%08" HWADDR_PRIx
-                          ", offset 0x%04" HWADDR_PRIx
-                          ", value 0x%0*" PRIx64 ")\n",
-                          size, RP2040_PADS_QSPI_BASE + addr, offset,
-                          size << 1, value64);
+            rp2040_log_unimplemented_write("padsqspi", size,
+                                           RP2040_PADS_QSPI_BASE + addr,
+                                           offset, value64);
         }
         break;
     }

@@ -6,6 +6,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/misc/rp2040_ioqspi.h"
 #include "hw/ssi/rp2040_xip.h"
 #include "migration/vmstate.h"
@@ -137,12 +138,9 @@ static uint64_t rp2040_ioqspi_read(void *opaque, hwaddr addr, unsigned size)
             break;
         default:
             value = 0;
-            qemu_log_mask(LOG_UNIMP, "rp2040.ioqspi: unimplemented read  "
-                          "(size %d, addr 0x%08" HWADDR_PRIx
-                          ", offset 0x%04" HWADDR_PRIx
-                          ") -> 0x%0*" PRIx64 "\n",
-                          size, RP2040_IOQSPI_BASE + addr, offset,
-                          size << 1, value);
+            rp2040_log_unimplemented_read("ioqspi", size,
+                                          RP2040_IOQSPI_BASE + addr, offset,
+                                          value);
             break;
         }
     }
@@ -205,13 +203,9 @@ static void rp2040_ioqspi_write(void *opaque, hwaddr addr,
             break;
         default:
             if (!rp2040_ioqspi_status_offset(offset)) {
-                qemu_log_mask(LOG_UNIMP, "rp2040.ioqspi: "
-                              "unimplemented write "
-                              "(size %d, addr 0x%08" HWADDR_PRIx
-                              ", offset 0x%04" HWADDR_PRIx
-                              ", value 0x%0*" PRIx64 ")\n",
-                              size, RP2040_IOQSPI_BASE + addr, offset,
-                              size << 1, value64);
+                rp2040_log_unimplemented_write("ioqspi", size,
+                                               RP2040_IOQSPI_BASE + addr,
+                                               offset, value64);
             }
             break;
         }

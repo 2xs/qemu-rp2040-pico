@@ -6,6 +6,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/core/qdev-clock.h"
+#include "hw/misc/rp2040_nyi.h"
 #include "hw/misc/rp2040_xosc.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
@@ -85,11 +86,9 @@ static uint64_t rp2040_xosc_read(void *opaque, hwaddr addr, unsigned size)
         break;
     default:
         value = 0;
-        qemu_log_mask(LOG_UNIMP, "rp2040.xosc: unimplemented read  "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx ") -> 0x%0*" PRIx64 "\n",
-                      size, RP2040_XOSC_BASE + addr, offset, size << 1,
-                      value);
+        rp2040_log_unimplemented_read("xosc", size,
+                                      RP2040_XOSC_BASE + addr, offset,
+                                      value);
         break;
     }
 
@@ -159,12 +158,9 @@ static void rp2040_xosc_write(void *opaque, hwaddr addr,
         s->count = 0;
         break;
     default:
-        qemu_log_mask(LOG_UNIMP, "rp2040.xosc: unimplemented write "
-                      "(size %d, addr 0x%08" HWADDR_PRIx
-                      ", offset 0x%04" HWADDR_PRIx
-                      ", value 0x%0*" PRIx64 ")\n",
-                      size, RP2040_XOSC_BASE + addr, offset, size << 1,
-                      value64);
+        rp2040_log_unimplemented_write("xosc", size,
+                                       RP2040_XOSC_BASE + addr, offset,
+                                       value64);
         break;
     }
 }
