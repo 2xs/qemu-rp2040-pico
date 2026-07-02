@@ -60,6 +60,7 @@
 #define DMA_CTRL_CHAIN_TO_SHIFT  11
 #define DMA_CTRL_CHAIN_TO_MASK   (0xf << DMA_CTRL_CHAIN_TO_SHIFT)
 #define DMA_CTRL_RING_SEL        BIT(10)
+#define DMA_CTRL_RING_SIZE_SHIFT 6
 #define DMA_CTRL_RING_SIZE_MASK  (0xf << 6)
 #define DMA_CTRL_INCR_WRITE      BIT(5)
 #define DMA_CTRL_INCR_READ       BIT(4)
@@ -147,6 +148,28 @@ static bool rp2040_dma_treq_is_ready_sink(uint32_t treq)
     return treq == RP2040_DREQ_XIP_SSITX;
 }
 
+static uint32_t rp2040_dma_next_addr(RP2040DmaChannel *ch, uint32_t addr,
+                                     unsigned width, bool write)
+{
+    uint32_t ring_size;
+    bool ring_write;
+    uint32_t mask;
+
+    if (!(ch->ctrl & (write ? DMA_CTRL_INCR_WRITE : DMA_CTRL_INCR_READ))) {
+        return addr;
+    }
+
+    ring_size = (ch->ctrl & DMA_CTRL_RING_SIZE_MASK) >>
+                DMA_CTRL_RING_SIZE_SHIFT;
+    ring_write = ch->ctrl & DMA_CTRL_RING_SEL;
+    if (ring_size == 0 || ring_write != write) {
+        return addr + width;
+    }
+
+    mask = (1u << ring_size) - 1;
+    return (addr & ~mask) | ((addr + width) & mask);
+}
+
 static void rp2040_dma_finish_channel(RP2040DmaState *s, unsigned index,
                                       unsigned chain_depth)
 {
@@ -178,9 +201,9 @@ static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
         return;
     }
 
-    if (ch->ctrl & (DMA_CTRL_SNIFF_EN | DMA_CTRL_RING_SIZE_MASK)) {
-        rp2040_log_nyi("dma", "sniff/ring transfer",
-                       "transfer runs without checksum or ring wrapping");
+    if (ch->ctrl & DMA_CTRL_SNIFF_EN) {
+        rp2040_log_nyi("dma", "sniff transfer",
+                       "transfer runs without checksum update");
     }
 
     width = rp2040_dma_transfer_size(ch);
@@ -220,12 +243,8 @@ static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
         }
 
         ch->trans_count--;
-        if (ch->ctrl & DMA_CTRL_INCR_READ) {
-            ch->read_addr += width;
-        }
-        if (ch->ctrl & DMA_CTRL_INCR_WRITE) {
-            ch->write_addr += width;
-        }
+        ch->read_addr = rp2040_dma_next_addr(ch, ch->read_addr, width, false);
+        ch->write_addr = rp2040_dma_next_addr(ch, ch->write_addr, width, true);
     }
 
     if ((ch->ctrl & DMA_CTRL_ERROR_MASK) || ch->trans_count == 0) {

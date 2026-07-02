@@ -534,9 +534,11 @@ Current SDK compatibility note:
   the boot ROM table supports enough SDK default helper/data lookups. The test
   validates SDK `hardware_dma` copy and fill transfers against the QEMU DMA
   model and remains outside Git.
+- [x] Implement DMA read/write ring wrapping for incrementing addresses, with
+  qtest coverage for write-side circular buffers.
 - [ ] Implement or document remaining DMA features: UART paced DREQs, DMA
-  timer paced DREQs, ring wrapping, sniff checksum, abort latency, and error
-  reporting fidelity.
+  timer paced DREQs, sniff checksum, abort latency, and error reporting
+  fidelity.
 
 ## Phase 15c: SDK Flash Safe Execute and Multicore Lockout
 
