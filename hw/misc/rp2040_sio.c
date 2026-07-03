@@ -44,6 +44,25 @@
 #define SIO_DIV_QUOTIENT        0x070
 #define SIO_DIV_REMAINDER       0x074
 #define SIO_DIV_CSR             0x078
+#define SIO_INTERP0_BASE        0x080
+#define SIO_INTERP1_BASE        0x0c0
+#define SIO_INTERP_BLOCK_SIZE   0x040
+#define SIO_INTERP_ACCUM0       0x00
+#define SIO_INTERP_ACCUM1       0x04
+#define SIO_INTERP_BASE0        0x08
+#define SIO_INTERP_BASE1        0x0c
+#define SIO_INTERP_BASE2        0x10
+#define SIO_INTERP_POP_LANE0    0x14
+#define SIO_INTERP_POP_LANE1    0x18
+#define SIO_INTERP_POP_FULL     0x1c
+#define SIO_INTERP_PEEK_LANE0   0x20
+#define SIO_INTERP_PEEK_LANE1   0x24
+#define SIO_INTERP_PEEK_FULL    0x28
+#define SIO_INTERP_CTRL_LANE0   0x2c
+#define SIO_INTERP_CTRL_LANE1   0x30
+#define SIO_INTERP_ACCUM0_ADD   0x34
+#define SIO_INTERP_ACCUM1_ADD   0x38
+#define SIO_INTERP_BASE_1AND0   0x3c
 #define SIO_SPINLOCK_BASE       0x100
 #define SIO_SPINLOCK_LAST       0x17c
 
@@ -54,6 +73,30 @@
 #define SIO_FIFO_ST_WC_MASK     (BIT(3) | BIT(2))
 #define SIO_DIV_CSR_READY       BIT(0)
 #define SIO_DIV_CSR_DIRTY       BIT(1)
+#define SIO_INTERP_CTRL_FORCE_MSB_SHIFT 19
+#define SIO_INTERP_CTRL_ADD_RAW         BIT(18)
+#define SIO_INTERP_CTRL_CROSS_RESULT    BIT(17)
+#define SIO_INTERP_CTRL_CROSS_INPUT     BIT(16)
+#define SIO_INTERP_CTRL_SIGNED          BIT(15)
+#define SIO_INTERP_CTRL_MASK_MSB_SHIFT  10
+#define SIO_INTERP_CTRL_MASK_LSB_SHIFT  5
+#define SIO_INTERP_CTRL_SHIFT_MASK      0x1f
+#define SIO_INTERP_CTRL_LSB_MASK        (0x1f << 5)
+#define SIO_INTERP_CTRL_MSB_MASK        (0x1f << 10)
+#define SIO_INTERP0_CTRL_BLEND          BIT(21)
+#define SIO_INTERP1_CTRL_CLAMP          BIT(22)
+#define SIO_INTERP_CTRL_OVERF           BIT(25)
+#define SIO_INTERP_CTRL_OVERF1          BIT(24)
+#define SIO_INTERP_CTRL_OVERF0          BIT(23)
+#define SIO_INTERP_CTRL_OVERF_MASK      (SIO_INTERP_CTRL_OVERF | \
+                                         SIO_INTERP_CTRL_OVERF1 | \
+                                         SIO_INTERP_CTRL_OVERF0)
+
+typedef struct RP2040SioInterpResult {
+    uint32_t raw[RP2040_SIO_INTERP_NUM_LANES];
+    uint32_t lane[RP2040_SIO_INTERP_NUM_LANES];
+    uint32_t full;
+} RP2040SioInterpResult;
 
 static unsigned rp2040_sio_current_core(void)
 {
@@ -190,12 +233,375 @@ static uint32_t rp2040_sio_div_csr(RP2040SioState *s, unsigned core)
            (s->div_dirty[core] ? SIO_DIV_CSR_DIRTY : 0);
 }
 
+static unsigned rp2040_sio_interp_index(unsigned interp, unsigned lane)
+{
+    return interp * RP2040_SIO_INTERP_NUM_LANES + lane;
+}
+
+static unsigned rp2040_sio_interp_base_index(unsigned interp, unsigned base)
+{
+    return interp * RP2040_SIO_INTERP_NUM_BASES + base;
+}
+
+static uint32_t rp2040_sio_interp_ctrl_mask(unsigned interp, unsigned lane)
+{
+    uint32_t mask = SIO_INTERP_CTRL_SHIFT_MASK |
+                    SIO_INTERP_CTRL_LSB_MASK |
+                    SIO_INTERP_CTRL_MSB_MASK |
+                    SIO_INTERP_CTRL_SIGNED |
+                    SIO_INTERP_CTRL_CROSS_INPUT |
+                    SIO_INTERP_CTRL_CROSS_RESULT |
+                    SIO_INTERP_CTRL_ADD_RAW |
+                    (0x3 << SIO_INTERP_CTRL_FORCE_MSB_SHIFT);
+
+    if (interp == 0 && lane == 0) {
+        mask |= SIO_INTERP0_CTRL_BLEND;
+    } else if (interp == 1 && lane == 0) {
+        mask |= SIO_INTERP1_CTRL_CLAMP;
+    }
+
+    return mask;
+}
+
+static bool rp2040_sio_interp_offset(hwaddr addr, unsigned *interp,
+                                     hwaddr *reg)
+{
+    if (addr >= SIO_INTERP0_BASE &&
+        addr < SIO_INTERP0_BASE + SIO_INTERP_BLOCK_SIZE) {
+        *interp = 0;
+        *reg = addr - SIO_INTERP0_BASE;
+        return true;
+    }
+
+    if (addr >= SIO_INTERP1_BASE &&
+        addr < SIO_INTERP1_BASE + SIO_INTERP_BLOCK_SIZE) {
+        *interp = 1;
+        *reg = addr - SIO_INTERP1_BASE;
+        return true;
+    }
+
+    return false;
+}
+
+static uint32_t rp2040_sio_interp_mask(unsigned lsb, unsigned msb)
+{
+    if (msb < lsb) {
+        return 0;
+    }
+
+    if (msb == 31) {
+        return UINT32_MAX << lsb;
+    }
+
+    return ((BIT(msb + 1) - 1) & ~(BIT(lsb) - 1));
+}
+
+static uint32_t rp2040_sio_interp_sign_extend(uint32_t value, unsigned msb)
+{
+    if (msb == 31 || !(value & BIT(msb))) {
+        return value;
+    }
+
+    return value | (UINT32_MAX << (msb + 1));
+}
+
+static uint32_t rp2040_sio_interp_raw(RP2040SioState *s, unsigned core,
+                                      unsigned interp, unsigned lane)
+{
+    uint32_t ctrl = s->interp_ctrl[core]
+                                  [rp2040_sio_interp_index(interp, lane)];
+    uint32_t input;
+    uint32_t shifted;
+    uint32_t value;
+    unsigned shift = ctrl & SIO_INTERP_CTRL_SHIFT_MASK;
+    unsigned lsb = (ctrl & SIO_INTERP_CTRL_LSB_MASK) >>
+                   SIO_INTERP_CTRL_MASK_LSB_SHIFT;
+    unsigned msb = (ctrl & SIO_INTERP_CTRL_MSB_MASK) >>
+                   SIO_INTERP_CTRL_MASK_MSB_SHIFT;
+
+    input = s->interp_accum[core][rp2040_sio_interp_index(
+                                  interp,
+                                  (ctrl & SIO_INTERP_CTRL_CROSS_INPUT) ?
+                                  (lane ^ 1) : lane)];
+    if (ctrl & SIO_INTERP_CTRL_ADD_RAW) {
+        return input;
+    }
+
+    shifted = input >> shift;
+    value = shifted & rp2040_sio_interp_mask(lsb, msb);
+    if (ctrl & SIO_INTERP_CTRL_SIGNED) {
+        value = rp2040_sio_interp_sign_extend(value, msb);
+    }
+
+    return value;
+}
+
+static uint32_t rp2040_sio_interp_force_msb(RP2040SioState *s, unsigned core,
+                                            unsigned interp, unsigned lane,
+                                            uint32_t value)
+{
+    uint32_t ctrl = s->interp_ctrl[core]
+                                  [rp2040_sio_interp_index(interp, lane)];
+    uint32_t force = (ctrl >> SIO_INTERP_CTRL_FORCE_MSB_SHIFT) & 0x3;
+
+    return value | (force << 28);
+}
+
+static uint32_t rp2040_sio_interp_blend_result(RP2040SioState *s,
+                                               unsigned core, uint32_t alpha)
+{
+    uint32_t ctrl1 = s->interp_ctrl[core][rp2040_sio_interp_index(0, 1)];
+    uint32_t base0 = s->interp_base[core][rp2040_sio_interp_base_index(0, 0)];
+    uint32_t base1 = s->interp_base[core][rp2040_sio_interp_base_index(0, 1)];
+    int64_t start;
+    int64_t end;
+
+    if (ctrl1 & SIO_INTERP_CTRL_SIGNED) {
+        start = (int16_t)base0;
+        end = (int16_t)base1;
+    } else {
+        start = (uint16_t)base0;
+        end = (uint16_t)base1;
+    }
+
+    return start + (((end - start) * (alpha & 0xff)) >> 8);
+}
+
+static void rp2040_sio_interp_compute(RP2040SioState *s, unsigned core,
+                                      unsigned interp,
+                                      RP2040SioInterpResult *result)
+{
+    bool blend = interp == 0 &&
+                 (s->interp_ctrl[core][rp2040_sio_interp_index(0, 0)] &
+                  SIO_INTERP0_CTRL_BLEND);
+    bool clamp = interp == 1 &&
+                 (s->interp_ctrl[core][rp2040_sio_interp_index(1, 0)] &
+                  SIO_INTERP1_CTRL_CLAMP);
+    uint32_t base0 = s->interp_base[core]
+                                   [rp2040_sio_interp_base_index(interp, 0)];
+    uint32_t base1 = s->interp_base[core]
+                                   [rp2040_sio_interp_base_index(interp, 1)];
+    uint32_t base2 = s->interp_base[core]
+                                   [rp2040_sio_interp_base_index(interp, 2)];
+
+    result->raw[0] = rp2040_sio_interp_raw(s, core, interp, 0);
+    result->raw[1] = rp2040_sio_interp_raw(s, core, interp, 1);
+    result->lane[0] = base0 + result->raw[0];
+    result->lane[1] = base1 + result->raw[1];
+    result->full = base2 + result->raw[0] + result->raw[1];
+
+    if (blend) {
+        uint32_t alpha = result->raw[1] & 0xff;
+
+        result->lane[0] = alpha;
+        result->lane[1] = rp2040_sio_interp_blend_result(s, core, alpha);
+        result->full = base2 + result->raw[0];
+    } else if (clamp) {
+        uint32_t ctrl0 = s->interp_ctrl[core][rp2040_sio_interp_index(1, 0)];
+
+        if (ctrl0 & SIO_INTERP_CTRL_SIGNED) {
+            int32_t value = result->raw[0];
+            int32_t lower = base0;
+            int32_t upper = base1;
+
+            result->lane[0] = value < lower ? lower :
+                              value > upper ? upper : value;
+        } else {
+            result->lane[0] = result->raw[0] < base0 ? base0 :
+                              result->raw[0] > base1 ? base1 :
+                              result->raw[0];
+        }
+    }
+}
+
+static uint32_t rp2040_sio_interp_pop(RP2040SioState *s, unsigned core,
+                                      unsigned interp, unsigned lane)
+{
+    RP2040SioInterpResult result;
+    uint32_t ctrl0 = s->interp_ctrl[core]
+                                   [rp2040_sio_interp_index(interp, 0)];
+    uint32_t ctrl1 = s->interp_ctrl[core]
+                                   [rp2040_sio_interp_index(interp, 1)];
+    uint32_t next0;
+    uint32_t next1;
+
+    rp2040_sio_interp_compute(s, core, interp, &result);
+    next0 = (ctrl0 & SIO_INTERP_CTRL_CROSS_RESULT) ?
+            result.lane[1] : result.lane[0];
+    next1 = (ctrl1 & SIO_INTERP_CTRL_CROSS_RESULT) ?
+            result.lane[0] : result.lane[1];
+
+    s->interp_accum[core][rp2040_sio_interp_index(interp, 0)] = next0;
+    s->interp_accum[core][rp2040_sio_interp_index(interp, 1)] = next1;
+
+    return lane < 2 ? rp2040_sio_interp_force_msb(s, core, interp, lane,
+                                                  result.lane[lane]) :
+                      result.full;
+}
+
+static uint32_t rp2040_sio_interp_overf(RP2040SioState *s, unsigned core,
+                                        unsigned interp, unsigned lane)
+{
+    uint32_t ctrl = s->interp_ctrl[core]
+                                  [rp2040_sio_interp_index(interp, lane)];
+    unsigned shift = ctrl & SIO_INTERP_CTRL_SHIFT_MASK;
+    unsigned lsb = (ctrl & SIO_INTERP_CTRL_LSB_MASK) >>
+                   SIO_INTERP_CTRL_MASK_LSB_SHIFT;
+    unsigned msb = (ctrl & SIO_INTERP_CTRL_MSB_MASK) >>
+                   SIO_INTERP_CTRL_MASK_MSB_SHIFT;
+    uint32_t input = s->interp_accum[core][rp2040_sio_interp_index(
+                                           interp,
+                                           (ctrl &
+                                            SIO_INTERP_CTRL_CROSS_INPUT) ?
+                                           (lane ^ 1) : lane)];
+    uint32_t shifted = input >> shift;
+
+    return (shifted & ~rp2040_sio_interp_mask(lsb, msb)) != 0;
+}
+
+static uint32_t rp2040_sio_interp_ctrl_read(RP2040SioState *s, unsigned core,
+                                            unsigned interp, unsigned lane)
+{
+    uint32_t ctrl = s->interp_ctrl[core]
+                                  [rp2040_sio_interp_index(interp, lane)];
+    bool overf0 = rp2040_sio_interp_overf(s, core, interp, 0);
+    bool overf1 = rp2040_sio_interp_overf(s, core, interp, 1);
+
+    ctrl &= ~SIO_INTERP_CTRL_OVERF_MASK;
+    if (overf0) {
+        ctrl |= SIO_INTERP_CTRL_OVERF0;
+    }
+    if (overf1) {
+        ctrl |= SIO_INTERP_CTRL_OVERF1;
+    }
+    if (overf0 || overf1) {
+        ctrl |= SIO_INTERP_CTRL_OVERF;
+    }
+
+    return ctrl;
+}
+
+static uint32_t rp2040_sio_interp_read(RP2040SioState *s, unsigned core,
+                                       unsigned interp, hwaddr reg)
+{
+    RP2040SioInterpResult result;
+
+    switch (reg) {
+    case SIO_INTERP_ACCUM0:
+    case SIO_INTERP_ACCUM1:
+        return s->interp_accum[core][rp2040_sio_interp_index(
+                                     interp, reg == SIO_INTERP_ACCUM1)];
+    case SIO_INTERP_BASE0:
+    case SIO_INTERP_BASE1:
+    case SIO_INTERP_BASE2:
+        return s->interp_base[core][rp2040_sio_interp_base_index(
+                                  interp, (reg - SIO_INTERP_BASE0) /
+                                          sizeof(uint32_t))];
+    case SIO_INTERP_POP_LANE0:
+        return rp2040_sio_interp_pop(s, core, interp, 0);
+    case SIO_INTERP_POP_LANE1:
+        return rp2040_sio_interp_pop(s, core, interp, 1);
+    case SIO_INTERP_POP_FULL:
+        return rp2040_sio_interp_pop(s, core, interp, 2);
+    case SIO_INTERP_PEEK_LANE0:
+    case SIO_INTERP_PEEK_LANE1:
+    case SIO_INTERP_PEEK_FULL:
+        rp2040_sio_interp_compute(s, core, interp, &result);
+        if (reg == SIO_INTERP_PEEK_LANE0) {
+            return rp2040_sio_interp_force_msb(s, core, interp, 0,
+                                               result.lane[0]);
+        }
+        if (reg == SIO_INTERP_PEEK_LANE1) {
+            return rp2040_sio_interp_force_msb(s, core, interp, 1,
+                                               result.lane[1]);
+        }
+        return result.full;
+    case SIO_INTERP_CTRL_LANE0:
+    case SIO_INTERP_CTRL_LANE1:
+        return rp2040_sio_interp_ctrl_read(s, core, interp,
+                                           reg == SIO_INTERP_CTRL_LANE1);
+    case SIO_INTERP_ACCUM0_ADD:
+    case SIO_INTERP_ACCUM1_ADD:
+        return rp2040_sio_interp_raw(s, core, interp,
+                                     reg == SIO_INTERP_ACCUM1_ADD);
+    case SIO_INTERP_BASE_1AND0:
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+static void rp2040_sio_interp_write(RP2040SioState *s, unsigned core,
+                                    unsigned interp, hwaddr reg,
+                                    uint32_t value)
+{
+    unsigned lane;
+    unsigned base;
+    bool base01_signed;
+
+    switch (reg) {
+    case SIO_INTERP_ACCUM0:
+    case SIO_INTERP_ACCUM1:
+        lane = reg == SIO_INTERP_ACCUM1;
+        s->interp_accum[core][rp2040_sio_interp_index(interp, lane)] = value;
+        break;
+    case SIO_INTERP_BASE0:
+    case SIO_INTERP_BASE1:
+    case SIO_INTERP_BASE2:
+        base = (reg - SIO_INTERP_BASE0) / sizeof(uint32_t);
+        s->interp_base[core][rp2040_sio_interp_base_index(interp, base)] =
+            value;
+        break;
+    case SIO_INTERP_CTRL_LANE0:
+    case SIO_INTERP_CTRL_LANE1:
+        lane = reg == SIO_INTERP_CTRL_LANE1;
+        s->interp_ctrl[core][rp2040_sio_interp_index(interp, lane)] =
+            value & rp2040_sio_interp_ctrl_mask(interp, lane);
+        break;
+    case SIO_INTERP_ACCUM0_ADD:
+    case SIO_INTERP_ACCUM1_ADD:
+        lane = reg == SIO_INTERP_ACCUM1_ADD;
+        s->interp_accum[core][rp2040_sio_interp_index(interp, lane)] +=
+            value & 0x00ffffff;
+        break;
+    case SIO_INTERP_BASE_1AND0:
+        base01_signed = interp == 0 &&
+                        (s->interp_ctrl[core]
+                                       [rp2040_sio_interp_index(0, 0)] &
+                         SIO_INTERP0_CTRL_BLEND) ?
+                        (s->interp_ctrl[core]
+                                       [rp2040_sio_interp_index(0, 1)] &
+                         SIO_INTERP_CTRL_SIGNED) : false;
+
+        for (base = 0; base < 2; base++) {
+            uint16_t half = value >> (base * 16);
+            bool sign = base01_signed ||
+                        (s->interp_ctrl[core]
+                                       [rp2040_sio_interp_index(interp,
+                                                                base)] &
+                         SIO_INTERP_CTRL_SIGNED);
+
+            s->interp_base[core][rp2040_sio_interp_base_index(interp, base)] =
+                sign ? (uint32_t)(int16_t)half : half;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
 {
     RP2040SioState *s = opaque;
     unsigned core = rp2040_sio_current_core();
+    unsigned interp;
     unsigned index;
+    hwaddr interp_reg;
     uint64_t value;
+
+    if (rp2040_sio_interp_offset(addr, &interp, &interp_reg)) {
+        return rp2040_sio_interp_read(s, core, interp, interp_reg);
+    }
 
     switch (addr) {
     case SIO_CPUID:
@@ -267,8 +673,15 @@ static void rp2040_sio_write(void *opaque, hwaddr addr,
 {
     RP2040SioState *s = opaque;
     unsigned core = rp2040_sio_current_core();
+    unsigned interp;
     unsigned index;
+    hwaddr interp_reg;
     uint32_t value = value64;
+
+    if (rp2040_sio_interp_offset(addr, &interp, &interp_reg)) {
+        rp2040_sio_interp_write(s, core, interp, interp_reg, value);
+        return;
+    }
 
     switch (addr) {
     case SIO_GPIO_OUT:
@@ -391,6 +804,9 @@ static void rp2040_sio_reset(DeviceState *dev)
     memset(s->div_quotient, 0, sizeof(s->div_quotient));
     memset(s->div_remainder, 0, sizeof(s->div_remainder));
     memset(s->div_dirty, 0, sizeof(s->div_dirty));
+    memset(s->interp_accum, 0, sizeof(s->interp_accum));
+    memset(s->interp_base, 0, sizeof(s->interp_base));
+    memset(s->interp_ctrl, 0, sizeof(s->interp_ctrl));
     s->spinlock_st = 0;
     rp2040_sio_update_fifo_irq(s);
 }
@@ -408,7 +824,7 @@ static void rp2040_sio_init(Object *obj)
 
 static const VMStateDescription vmstate_rp2040_sio = {
     .name = TYPE_RP2040_SIO,
-    .version_id = 2,
+    .version_id = 3,
     .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32(gpio_out, RP2040SioState),
@@ -437,6 +853,18 @@ static const VMStateDescription vmstate_rp2040_sio = {
                              RP2040_SIO_NUM_CORES),
         VMSTATE_BOOL_ARRAY(div_dirty, RP2040SioState,
                            RP2040_SIO_NUM_CORES),
+        VMSTATE_UINT32_2DARRAY_V(interp_accum, RP2040SioState,
+                                 RP2040_SIO_NUM_CORES,
+                                 RP2040_SIO_NUM_INTERPS *
+                                 RP2040_SIO_INTERP_NUM_LANES, 3),
+        VMSTATE_UINT32_2DARRAY_V(interp_base, RP2040SioState,
+                                 RP2040_SIO_NUM_CORES,
+                                 RP2040_SIO_NUM_INTERPS *
+                                 RP2040_SIO_INTERP_NUM_BASES, 3),
+        VMSTATE_UINT32_2DARRAY_V(interp_ctrl, RP2040SioState,
+                                 RP2040_SIO_NUM_CORES,
+                                 RP2040_SIO_NUM_INTERPS *
+                                 RP2040_SIO_INTERP_NUM_LANES, 3),
         VMSTATE_UINT32(spinlock_st, RP2040SioState),
         VMSTATE_END_OF_LIST()
     }

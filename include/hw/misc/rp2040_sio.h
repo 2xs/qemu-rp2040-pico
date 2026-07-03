@@ -17,6 +17,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040SioState, RP2040_SIO)
 #define RP2040_SIO_BASE 0xd0000000
 #define RP2040_SIO_NUM_CORES 2
 #define RP2040_SIO_FIFO_DEPTH 8
+#define RP2040_SIO_NUM_INTERPS 2
+#define RP2040_SIO_INTERP_NUM_LANES 2
+#define RP2040_SIO_INTERP_NUM_BASES 3
 
 struct RP2040SioState {
     SysBusDevice parent_obj;
@@ -39,6 +42,15 @@ struct RP2040SioState {
     uint32_t div_quotient[RP2040_SIO_NUM_CORES];
     uint32_t div_remainder[RP2040_SIO_NUM_CORES];
     bool div_dirty[RP2040_SIO_NUM_CORES];
+    uint32_t interp_accum[RP2040_SIO_NUM_CORES]
+                          [RP2040_SIO_NUM_INTERPS *
+                           RP2040_SIO_INTERP_NUM_LANES];
+    uint32_t interp_base[RP2040_SIO_NUM_CORES]
+                         [RP2040_SIO_NUM_INTERPS *
+                          RP2040_SIO_INTERP_NUM_BASES];
+    uint32_t interp_ctrl[RP2040_SIO_NUM_CORES]
+                         [RP2040_SIO_NUM_INTERPS *
+                          RP2040_SIO_INTERP_NUM_LANES];
     uint32_t spinlock_st;
 };
 

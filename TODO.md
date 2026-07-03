@@ -646,7 +646,7 @@ Current SDK flash-safe note:
 
 ## Phase 18: Post-Integration Roadmap
 
-- [ ] Add full SIO divider and interpolator datapaths.
+- [x] Add SIO divider and interpolator datapaths.
 - [ ] Improve timer fidelity.
 - [x] Improve watchdog/reset behavior.
 - [ ] Improve SSI/QSPI fidelity.
