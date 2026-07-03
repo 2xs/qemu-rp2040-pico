@@ -289,11 +289,28 @@ was used.
 
 For the synthetic ROM path, ``flash_range_erase`` and
 ``flash_range_program`` update the QEMU XIP flash backing immediately.  This
-is an atomic compatibility service intended to validate SDK code paths
-without conflating them with XIP busy timing.  The lower-level SSI/XIP command
-path is still responsible for modelling serial flash command state and for
-raising the documented QEMU HardFault policy when guest code executes from
-XIP while the flash model is busy.
+is an atomic compatibility service intended to validate SDK code paths and to
+keep CI-oriented firmware tests fast and deterministic.  In this mode, the
+synthetic ROM is allowed to use QEMU-only pseudo-device services when they
+produce the same architectural result more simply than exercising the full
+hardware path.  It is therefore a functional acceleration path, not a claim
+that the real RP2040 mask ROM behaves that way internally.
+
+Fuller hardware-compatibility testing should use the external ``pipico.rom``
+mask ROM path.  That path is intentionally closer to the real boot ROM flow:
+firmware reaches the ROM supplied by the RFC artifact and flash operations
+exercise the emulated RP2040 peripherals more directly, including SIO/FIFO
+coordination, IO_QSPI/XIP state and SSI flash commands as the model grows.
+This is expected to be less convenient for small CI smoke tests, but it is the
+preferred path for validating behaviour that depends on the real ROM's
+hardware interactions.
+
+The lower-level SSI/XIP command path remains responsible for modelling serial
+flash command state and for raising the documented QEMU HardFault policy when
+guest code executes from XIP while the flash model is busy.  Tests that need
+that busy/fault behaviour should target the SSI/XIP model directly or use the
+``pipico.rom`` path once the relevant ROM/hardware interaction is supported,
+rather than relying on the synthetic ROM's atomic helper shortcuts.
 
 For software-driven flash operations, firmware programs the SSI through its
 APB register interface at ``XIP_SSI_BASE``.  The important registers for the

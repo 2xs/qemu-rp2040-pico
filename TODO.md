@@ -581,7 +581,7 @@ Current SDK compatibility note:
 - [x] Try the same SDK image with `-bios pipico.rom` after the external mask
   ROM path can launch core1; use this to validate the SIO/FIFO behavior shared
   by the SDK and the real ROM path.
-- [ ] Decide whether synthetic ROM flash helpers should stay atomic for fast
+- [x] Decide whether synthetic ROM flash helpers should stay atomic for fast
   compatibility tests, or whether they should optionally delegate to the more
   detailed XIP/SSI busy model by default.
 
@@ -613,6 +613,13 @@ Current SDK flash-safe note:
   -kernel .local/rp2040-sdk-tests/flash_safe_multicore/build/flash_safe_multicore.elf`;
   this validates the shared SIO/FIFO lockout path and the ROM-driven
   IO_QSPI/XIP flash command path.
+- Decision: keep the synthetic ROM flash helpers atomic by default. The
+  synthetic ROM is a functional acceleration path for fast, deterministic
+  host-side and CI tests, and may use QEMU pseudo-device shortcuts when they
+  produce the same architectural result. Hardware-compatibility testing should
+  prefer the RFC `pipico.rom` path, which is closer to the real Pico boot ROM
+  flow and exercises the emulated RP2040 peripherals more directly, even if it
+  is less convenient or less fast for smoke tests.
 
 ## Phase 16: Documentation
 
