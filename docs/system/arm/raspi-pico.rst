@@ -131,7 +131,10 @@ through the modeled ``PSM.FRCE_OFF.PROC1`` path at the ROM reset vector.
 ``PSM`` exposes the force-on, force-off, watchdog-select and done registers
 touched by the Pico SDK core1 reset path; ``FRCE_OFF_PROC1`` is stored,
 reflected in ``DONE``, and used to hold or release proc1.  The SIO divider and
-inter-core FIFO paths are implemented; SIO interpolators remain future work.
+inter-core FIFO paths are implemented.  SIO interpolators implement the
+normal shift/mask/sign datapaths, ``PEEK``/``POP`` accumulator updates,
+``CROSS_INPUT``/``CROSS_RESULT``, ``ADD_RAW``, ``FORCE_MSB``, ``BASE_1AND0``,
+INTERP0 blend mode and INTERP1 clamp mode.
 
 A local Pico SDK smoke test using ``multicore_launch_core1()`` has been used
 to validate this synthetic ROM core1 launch path.  Additional local SDK smoke
@@ -419,9 +422,15 @@ Known limitations
    UART pin mappings remain future work.
  * ``IO_BANK0`` stores GPIO function-select, override and interrupt registers,
    implements RP2040 atomic aliases, and gates UART host serial I/O for the
-   GPIO0/GPIO1 UART0 path and GPIO4/GPIO5 UART1 path.  It does not yet route
-   other SIO/peripheral signal paths, and it does not model pad input levels or
-   edge detection.
+   GPIO0/GPIO1 UART0 path and GPIO4/GPIO5 UART1 path.  It is still a
+   simplified routing model: it does not yet derive pad input levels from
+   ``PADS_BANK0`` electrical state, does not route general SIO GPIO outputs to
+   external pins, and does not connect arbitrary peripheral functions through
+   the GPIO matrix.  Edge detection and full interrupt source modelling remain
+   future work.
+ * SIO divider and interpolator results are computed immediately when their
+   registers are accessed.  QEMU does not model the RP2040 single-cycle timing,
+   divider latency, or cycle-accurate pipeline effects for these datapaths.
  * ``PADS_BANK0`` and ``PADS_QSPI`` store documented pad-control registers and
    implement RP2040 atomic aliases.  They do not model electrical pad
    behaviour and do not currently gate UART or XIP operation.
