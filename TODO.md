@@ -654,7 +654,15 @@ Current SDK flash-safe note:
 - [ ] Improve timer fidelity.
 - [x] Improve watchdog/reset behavior.
 - [ ] Improve SSI/QSPI fidelity.
-- [ ] Support a more faithful boot ROM flow.
+- [x] Keep in-tree functional tests for the external `pipico.rom` UF2/ELF boot
+  and flash persistence paths.
+- [ ] Add an in-tree no-SDK regression for external `pipico.rom` proc1 launch.
+- [ ] Document the upstream policy for distributing or requiring
+  `pipico.rom`. The local copy comes from Alex Bennee's RFC series, but the
+  RFC patch cache is not currently available under `/tmp/rp2040-rfc-patches`,
+  the local import commit does not include a license/provenance note, and the
+  ROM image itself only exposes a `Copyright 2020 Raspberry Pi Trading Ltd`
+  string.
 - [ ] Expand Pico SDK compatibility.
 - [ ] Add PIO.
 - [x] Add minimal DMA.
