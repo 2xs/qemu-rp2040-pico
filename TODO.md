@@ -454,6 +454,10 @@ Current SDK compatibility note:
 
 - Local SDK smoke tests are kept outside git under `.local/`. The in-tree
   no-SDK tests keep the same coverage self-contained for CI.
+- `.local/rp2040-sdk-tests/interp` builds a Pico SDK `hardware_interp`
+  firmware derived from the official `hello_interp` examples. It validates
+  mask/sign extension, cross-result POP updates, INTERP0 blend mode and
+  INTERP1 clamp mode, and prints `SDK INTERP OK` under QEMU synthetic ROM.
 - QEMU's synthetic ROM now exposes the RP2040 boot ROM table entries needed by
   the current SDK smoke tests for bit, memory, float, double and flash helper
   paths. Unsupported entries still route to explicit NYI stubs.
