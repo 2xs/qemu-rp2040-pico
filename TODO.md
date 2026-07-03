@@ -658,11 +658,13 @@ Current SDK flash-safe note:
   and flash persistence paths.
 - [ ] Add an in-tree no-SDK regression for external `pipico.rom` proc1 launch.
 - [ ] Document the upstream policy for distributing or requiring
-  `pipico.rom`. The local copy comes from Alex Bennee's RFC series, but the
-  RFC patch cache is not currently available under `/tmp/rp2040-rfc-patches`,
-  the local import commit does not include a license/provenance note, and the
-  ROM image itself only exposes a `Copyright 2020 Raspberry Pi Trading Ltd`
-  string.
+  `pipico.rom`. Alex Bennee's RFC patch 0004 documents that the RP2040 boot
+  code is open source at `https://github.com/raspberrypi/pico-bootrom`, but
+  also marks the binary addition as `(!upstream)` and says the included image
+  was extracted from a B1 Pico as a temporary stand-in until QEMU can build or
+  integrate the ROM source. An upstreamable path should therefore either build
+  from the open-source bootrom or require a user-supplied ROM, rather than
+  treating the extracted blob as final.
 - [ ] Expand Pico SDK compatibility.
 - [ ] Add PIO.
 - [x] Add minimal DMA.
