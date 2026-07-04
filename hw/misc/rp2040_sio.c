@@ -596,14 +596,17 @@ static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
     unsigned core = rp2040_sio_current_core();
     unsigned interp;
     unsigned index;
+    unsigned shift = (addr & 3) * 8;
     hwaddr interp_reg;
+    hwaddr reg = addr & ~3ULL;
     uint64_t value;
 
-    if (rp2040_sio_interp_offset(addr, &interp, &interp_reg)) {
-        return rp2040_sio_interp_read(s, core, interp, interp_reg);
+    if (rp2040_sio_interp_offset(reg, &interp, &interp_reg)) {
+        value = rp2040_sio_interp_read(s, core, interp, interp_reg);
+        return extract64(value, shift, size * 8);
     }
 
-    switch (addr) {
+    switch (reg) {
     case SIO_CPUID:
         value = core;
         break;
@@ -653,7 +656,7 @@ static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
         value = rp2040_sio_div_csr(s, core);
         break;
     default:
-        if (rp2040_sio_spinlock_offset(addr, &index)) {
+        if (rp2040_sio_spinlock_offset(reg, &index)) {
             value = (s->spinlock_st & BIT(index)) ? 0 : BIT(index);
             s->spinlock_st |= BIT(index);
         } else {
@@ -665,7 +668,7 @@ static uint64_t rp2040_sio_read(void *opaque, hwaddr addr, unsigned size)
         break;
     }
 
-    return value;
+    return extract64(value, shift, size * 8);
 }
 
 static void rp2040_sio_write(void *opaque, hwaddr addr,
@@ -675,15 +678,17 @@ static void rp2040_sio_write(void *opaque, hwaddr addr,
     unsigned core = rp2040_sio_current_core();
     unsigned interp;
     unsigned index;
+    unsigned shift = (addr & 3) * 8;
     hwaddr interp_reg;
-    uint32_t value = value64;
+    hwaddr reg = addr & ~3ULL;
+    uint32_t value = (uint32_t)value64 << shift;
 
-    if (rp2040_sio_interp_offset(addr, &interp, &interp_reg)) {
+    if (rp2040_sio_interp_offset(reg, &interp, &interp_reg)) {
         rp2040_sio_interp_write(s, core, interp, interp_reg, value);
         return;
     }
 
-    switch (addr) {
+    switch (reg) {
     case SIO_GPIO_OUT:
         s->gpio_out = value & SIO_GPIO_MASK;
         break;
@@ -763,7 +768,7 @@ static void rp2040_sio_write(void *opaque, hwaddr addr,
         s->div_dirty[core] = true;
         break;
     default:
-        if (rp2040_sio_spinlock_offset(addr, &index)) {
+        if (rp2040_sio_spinlock_offset(reg, &index)) {
             s->spinlock_st &= ~BIT(index);
         } else {
             rp2040_log_unimplemented_write("sio", size,
@@ -779,8 +784,9 @@ static const MemoryRegionOps rp2040_sio_ops = {
     .write = rp2040_sio_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
-        .min_access_size = 4,
+        .min_access_size = 1,
         .max_access_size = 4,
+        .unaligned = false,
     },
 };
 

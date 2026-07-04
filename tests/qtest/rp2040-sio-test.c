@@ -58,6 +58,7 @@ static void test_sio_reset_values(void)
     QTestState *qts = rp2040_start();
 
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_CPUID), ==, 0);
+    g_assert_cmphex(qtest_readb(qts, SIO_BASE + SIO_CPUID), ==, 0);
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_IN), ==, 0);
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_HI_IN), ==, BIT(1));
     g_assert_cmphex(qtest_readl(qts, SIO_BASE + SIO_GPIO_OUT), ==, 0);
