@@ -65,6 +65,18 @@ static uint32_t rp2040_watchdog_apply_alias(uint32_t old, uint32_t value,
     }
 }
 
+static uint32_t rp2040_watchdog_expand_write(uint32_t value, unsigned size)
+{
+    switch (size) {
+    case 1:
+        return value * 0x01010101u;
+    case 2:
+        return (value & 0xffffu) * 0x00010001u;
+    default:
+        return value;
+    }
+}
+
 static bool rp2040_watchdog_scratch_offset(hwaddr offset, unsigned *index)
 {
     if (offset < WATCHDOG_SCRATCH0 || offset > WATCHDOG_SCRATCH7) {
@@ -160,10 +172,11 @@ static uint64_t rp2040_watchdog_read(void *opaque, hwaddr addr, unsigned size)
 {
     RP2040WatchdogState *s = opaque;
     hwaddr offset = addr & 0xfff;
+    hwaddr word_offset = offset & ~3ULL;
     unsigned scratch;
     uint64_t value;
 
-    switch (offset) {
+    switch (word_offset) {
     case WATCHDOG_CTRL:
         value = rp2040_watchdog_ctrl_read(s);
         break;
@@ -177,7 +190,7 @@ static uint64_t rp2040_watchdog_read(void *opaque, hwaddr addr, unsigned size)
         value = rp2040_watchdog_tick_read(s);
         break;
     default:
-        if (rp2040_watchdog_scratch_offset(offset, &scratch)) {
+        if (rp2040_watchdog_scratch_offset(word_offset, &scratch)) {
             value = s->scratch[scratch];
         } else {
             value = 0;
@@ -188,7 +201,7 @@ static uint64_t rp2040_watchdog_read(void *opaque, hwaddr addr, unsigned size)
         break;
     }
 
-    return value;
+    return extract64(value, (offset & 3) * 8, size * 8);
 }
 
 static void rp2040_watchdog_write(void *opaque, hwaddr addr,
@@ -197,10 +210,11 @@ static void rp2040_watchdog_write(void *opaque, hwaddr addr,
     RP2040WatchdogState *s = opaque;
     hwaddr alias = addr & ATOMIC_ALIAS_MASK;
     hwaddr offset = addr & 0xfff;
+    hwaddr word_offset = offset & ~3ULL;
     unsigned scratch;
-    uint32_t value = value64;
+    uint32_t value = rp2040_watchdog_expand_write(value64, size);
 
-    switch (offset) {
+    switch (word_offset) {
     case WATCHDOG_CTRL: {
         uint32_t old = rp2040_watchdog_ctrl_read(s);
         uint32_t newval = rp2040_watchdog_apply_alias(old, value, alias);
@@ -228,7 +242,7 @@ static void rp2040_watchdog_write(void *opaque, hwaddr addr,
         rp2040_watchdog_update(s);
         break;
     default:
-        if (rp2040_watchdog_scratch_offset(offset, &scratch)) {
+        if (rp2040_watchdog_scratch_offset(word_offset, &scratch)) {
             s->scratch[scratch] =
                 rp2040_watchdog_apply_alias(s->scratch[scratch], value,
                                             alias);
@@ -246,8 +260,9 @@ static const MemoryRegionOps rp2040_watchdog_ops = {
     .write = rp2040_watchdog_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
-        .min_access_size = 4,
+        .min_access_size = 1,
         .max_access_size = 4,
+        .unaligned = false,
     },
 };
 

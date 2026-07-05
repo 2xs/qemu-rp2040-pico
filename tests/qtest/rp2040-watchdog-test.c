@@ -68,6 +68,27 @@ static void test_scratch_registers(void)
     g_assert_cmphex(qtest_readl(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0), ==,
                     0x12345678);
 
+    g_assert_cmphex(qtest_readb(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0), ==,
+                    0x78);
+    g_assert_cmphex(qtest_readb(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0 + 1),
+                    ==, 0x56);
+    g_assert_cmphex(qtest_readb(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0 + 2),
+                    ==, 0x34);
+    g_assert_cmphex(qtest_readb(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0 + 3),
+                    ==, 0x12);
+
+    qtest_writeb(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0, 0xa5);
+    g_assert_cmphex(qtest_readl(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0), ==,
+                    0xa5a5a5a5);
+
+    qtest_writeb(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0 + 1, 0x3c);
+    g_assert_cmphex(qtest_readl(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0), ==,
+                    0x3c3c3c3c);
+
+    qtest_writew(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0, 0xf00d);
+    g_assert_cmphex(qtest_readl(qts, WATCHDOG_BASE + WATCHDOG_SCRATCH0), ==,
+                    0xf00df00d);
+
     qtest_quit(qts);
 }
 
