@@ -31,6 +31,11 @@ struct RP2040RoscState {
     uint32_t phase;
     uint32_t count;
     int64_t count_start_ns;
+    uint64_t random_pool;
+    uint64_t random_prng_state;
+    uint64_t random_seed;
+    uint8_t random_pool_bits;
+    bool random_seed_set;
     bool badwrite;
 };
 

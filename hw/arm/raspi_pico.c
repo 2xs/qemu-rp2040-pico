@@ -14,6 +14,7 @@
 #include "hw/arm/rp2040.h"
 #include "hw/core/boards.h"
 #include "hw/core/qdev-properties.h"
+#include "qemu/cutils.h"
 #include "system/address-spaces.h"
 #include "system/system.h"
 #include "qom/object.h"
@@ -26,6 +27,9 @@ struct RaspiPicoMachineState {
 
     RP2040State soc;
     char *flash_file;
+    char *rosc_random_seed;
+    uint64_t rosc_random_seed_value;
+    bool rosc_random_seed_set;
     bool strict_uart_pins;
 };
 
@@ -45,6 +49,38 @@ static void raspi_pico_set_flash_file(Object *obj, const char *value,
     s->flash_file = g_strdup(value);
 }
 
+static char *raspi_pico_get_rosc_random_seed(Object *obj, Error **errp)
+{
+    RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
+
+    return g_strdup(s->rosc_random_seed ?: "");
+}
+
+static void raspi_pico_set_rosc_random_seed(Object *obj, const char *value,
+                                            Error **errp)
+{
+    RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
+    uint64_t seed;
+
+    if (!value || !*value) {
+        g_free(s->rosc_random_seed);
+        s->rosc_random_seed = NULL;
+        s->rosc_random_seed_value = 0;
+        s->rosc_random_seed_set = false;
+        return;
+    }
+
+    if (qemu_strtou64(value, NULL, 0, &seed) < 0) {
+        error_setg(errp, "invalid ROSC random seed '%s'", value);
+        return;
+    }
+
+    g_free(s->rosc_random_seed);
+    s->rosc_random_seed = g_strdup(value);
+    s->rosc_random_seed_value = seed;
+    s->rosc_random_seed_set = true;
+}
+
 static void raspi_pico_init(MachineState *machine)
 {
     RaspiPicoMachineState *s = RASPI_PICO_MACHINE(machine);
@@ -55,6 +91,10 @@ static void raspi_pico_init(MachineState *machine)
     qdev_prop_set_chr(DEVICE(&s->soc), "serial1", serial_hd(1));
     qdev_prop_set_bit(DEVICE(&s->soc), "strict-uart-pins",
                       s->strict_uart_pins);
+    qdev_prop_set_uint64(DEVICE(&s->soc.rosc), "random-seed",
+                         s->rosc_random_seed_value);
+    qdev_prop_set_bit(DEVICE(&s->soc.rosc), "random-seed-set",
+                      s->rosc_random_seed_set);
     /*
      * BOOTSEL is not pressed by default on a Pico board, so the mask ROM sees
      * the QSPI SS input deasserted and tries to boot from external flash.
@@ -88,6 +128,7 @@ static void raspi_pico_machine_finalize(Object *obj)
     RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
 
     g_free(s->flash_file);
+    g_free(s->rosc_random_seed);
 }
 
 static bool raspi_pico_get_strict_uart_pins(Object *obj, Error **errp)
@@ -131,6 +172,13 @@ static void raspi_pico_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "flash-file",
                                           "Load initial XIP flash contents "
                                           "from a raw host file");
+    object_class_property_add_str(oc, "rosc-random-seed",
+                                  raspi_pico_get_rosc_random_seed,
+                                  raspi_pico_set_rosc_random_seed);
+    object_class_property_set_description(oc, "rosc-random-seed",
+                                          "Use a deterministic seed for the "
+                                          "ROSC RANDOMBIT stream; if unset, "
+                                          "QEMU guest entropy is used");
     object_class_property_add_bool(oc, "strict-uart-pins",
                                    raspi_pico_get_strict_uart_pins,
                                    raspi_pico_set_strict_uart_pins);

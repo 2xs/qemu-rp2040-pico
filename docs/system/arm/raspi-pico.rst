@@ -64,6 +64,15 @@ a later run with only ``flash-file`` restarts from the overlaid image.
 Successful guest sector erase and page program commands are also written back
 to the raw file.
 
+The ring oscillator ``RANDOMBIT`` stream is backed by QEMU's guest-visible
+random source by default.  For reproducible tests, a deterministic stream can
+be requested with:
+
+.. code-block:: bash
+
+  $ qemu-system-arm -machine raspi-pico,rosc-random-seed=0x1234 \
+      -kernel firmware.elf -serial stdio
+
 Pico UF2 images can be converted to this raw flash format with:
 
 .. code-block:: bash
@@ -169,8 +178,18 @@ pages 221 to 227.  QEMU models a stable nominal ROSC and updates a QEMU
 ``Clock`` output from the visible enable/dormant/divider state.  ``COUNT`` is
 derived from QEMU virtual time rather than CPU cycles; in normal execution
 this follows elapsed host time, while in ``icount`` mode it follows QEMU's
-deterministic virtual clock.  The model does not emulate analog frequency
+deterministic virtual clock.  ``RANDOMBIT`` is not an analog oscillator model:
+without ``rosc-random-seed`` it refills from QEMU's guest-visible random
+source, and with ``rosc-random-seed`` it uses a deterministic pseudo-random
+stream for repeatable tests.  The model does not emulate analog frequency
 variation with process, voltage or temperature.
+
+The bus fabric control model implements the documented ``BUS_PRIORITY``,
+``BUS_PRIORITY_ACK`` and four ``PERFCTR``/``PERFSEL`` performance-counter
+pairs.  See datasheet section 2.1, pages 14 to 20.  Priority changes are
+acknowledged immediately.  The performance counters expose the reset values
+and software-visible selection/clear behaviour; selected counters advance on
+read rather than counting real AHB-Lite bus arbitration events.
 
 The QSPI IO bank model implements the documented IO_QSPI register layout for
 the six QSPI pins.  It stores each pin's ``CTRL`` register, returns stable
@@ -454,9 +473,12 @@ Known limitations
  * ``IO_QSPI`` stores pin-control and interrupt registers and forwards forced
    ``GPIO_QSPI_SS`` changes to the XIP/SSI model.  It does not emulate the
    electrical QSPI pads or a separate serial bus.
- * The ROSC model exposes stable register behaviour and a nominal clock.  It
-   does not model analog frequency variation or true entropy from
-   ``RANDOMBIT``.
+ * The ROSC model exposes stable register behaviour, a nominal clock and a
+   QEMU-backed ``RANDOMBIT`` stream.  It does not model analog frequency
+   variation or physical oscillator entropy.
+ * ``BUSCTRL`` performance counters are software-visible counters, not real
+   bus-fabric event counters.  They are sufficient for SDK entropy paths but
+   not for measuring emulated bus contention.
  * The boot ROM flow is still a bring-up path and is not yet a faithful
    RP2040 mask ROM execution model.  The synthetic ROM supports the direct
    boot2/application launch path and the core1 FIFO launch sequence, but not

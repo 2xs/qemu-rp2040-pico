@@ -259,7 +259,6 @@ static const struct {
     hwaddr base;
     hwaddr size;
 } rp2040_unimplemented[] = {
-    { "rp2040.busctrl",  0x40030000, 0x4000 },
     { "rp2040.spi0",     0x4003c000, 0x4000 },
     { "rp2040.spi1",     0x40040000, 0x4000 },
     { "rp2040.i2c0",     0x40044000, 0x4000 },
@@ -1620,6 +1619,7 @@ static void rp2040_soc_init(Object *obj)
     object_property_add_alias(obj, "serial1", OBJECT(&s->uart1), "chardev");
 
     object_initialize_child(obj, "xip", &s->xip, TYPE_RP2040_XIP);
+    object_initialize_child(obj, "busctrl", &s->busctrl, TYPE_RP2040_BUSCTRL);
     object_initialize_child(obj, "clocks", &s->clocks, TYPE_RP2040_CLOCKS);
     object_initialize_child(obj, "dma", &s->dma, TYPE_RP2040_DMA);
     object_initialize_child(obj, "iobank0", &s->iobank0,
@@ -1719,6 +1719,11 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 0, RP2040_XIP_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 1, RP2040_XIP_CTRL_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 2, RP2040_XIP_SSI_BASE);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->busctrl), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->busctrl), 0, RP2040_BUSCTRL_BASE);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->clocks), errp)) {
         return;

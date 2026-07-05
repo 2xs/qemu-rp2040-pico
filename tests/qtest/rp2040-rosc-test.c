@@ -34,6 +34,18 @@ static QTestState *rp2040_start(void)
     return qtest_init("-machine raspi-pico");
 }
 
+static uint32_t read_random_bits(QTestState *qts, unsigned count)
+{
+    uint32_t value = 0;
+    unsigned i;
+
+    for (i = 0; i < count; i++) {
+        value |= (qtest_readl(qts, ROSC_BASE + ROSC_RANDOMBIT) & BIT(0)) << i;
+    }
+
+    return value;
+}
+
 static void test_rosc_reset_values(void)
 {
     QTestState *qts = rp2040_start();
@@ -99,6 +111,24 @@ static void test_rosc_misc_values(void)
     qtest_quit(qts);
 }
 
+static void test_rosc_seeded_randombit(void)
+{
+    QTestState *qts_a;
+    QTestState *qts_b;
+    uint32_t bits_a;
+    uint32_t bits_b;
+
+    qts_a = qtest_init("-machine raspi-pico,rosc-random-seed=0x1234");
+    bits_a = read_random_bits(qts_a, 32);
+    qtest_quit(qts_a);
+
+    qts_b = qtest_init("-machine raspi-pico,rosc-random-seed=0x1234");
+    bits_b = read_random_bits(qts_b, 32);
+    qtest_quit(qts_b);
+
+    g_assert_cmphex(bits_a, ==, bits_b);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -109,6 +139,8 @@ int main(int argc, char **argv)
     qtest_add_func("/rp2040-rosc/count-reaches-zero",
                    test_rosc_count_reaches_zero);
     qtest_add_func("/rp2040-rosc/misc-values", test_rosc_misc_values);
+    qtest_add_func("/rp2040-rosc/seeded-randombit",
+                   test_rosc_seeded_randombit);
 
     return g_test_run();
 }

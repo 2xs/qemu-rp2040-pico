@@ -6,9 +6,11 @@
 
 #include "qemu/osdep.h"
 #include "hw/core/qdev-clock.h"
+#include "hw/core/qdev-properties.h"
 #include "hw/misc/rp2040_nyi.h"
 #include "hw/misc/rp2040_rosc.h"
 #include "migration/vmstate.h"
+#include "qemu/guest-random.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
@@ -149,6 +151,36 @@ static uint32_t rp2040_rosc_status(RP2040RoscState *s)
     return value;
 }
 
+static uint32_t rp2040_rosc_random_bit(RP2040RoscState *s)
+{
+    uint64_t x;
+    uint32_t bit;
+
+    if (!rp2040_rosc_running(s)) {
+        return 0;
+    }
+
+    if (!s->random_seed_set) {
+        if (!s->random_pool_bits) {
+            qemu_guest_getrandom_nofail(&s->random_pool,
+                                        sizeof(s->random_pool));
+            s->random_pool_bits = 64;
+        }
+
+        bit = s->random_pool & 1;
+        s->random_pool >>= 1;
+        s->random_pool_bits--;
+        return bit;
+    }
+
+    x = s->random_prng_state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    s->random_prng_state = x;
+    return (x * 0x2545f4914f6cdd1dull) >> 63;
+}
+
 static uint64_t rp2040_rosc_read(void *opaque, hwaddr addr, unsigned size)
 {
     RP2040RoscState *s = opaque;
@@ -178,7 +210,7 @@ static uint64_t rp2040_rosc_read(void *opaque, hwaddr addr, unsigned size)
         value = rp2040_rosc_status(s);
         break;
     case ROSC_RANDOMBIT:
-        value = extract64(qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL), 4, 1);
+        value = rp2040_rosc_random_bit(s);
         break;
     case ROSC_COUNT:
         value = rp2040_rosc_count_read(s);
@@ -322,6 +354,12 @@ static void rp2040_rosc_reset(DeviceState *dev)
     s->phase = 0x00000aa8;
     s->count = 0;
     s->count_start_ns = 0;
+    s->random_pool = 0;
+    s->random_pool_bits = 0;
+    s->random_prng_state = s->random_seed;
+    if (!s->random_prng_state) {
+        s->random_prng_state = 0x9e3779b97f4a7c15ull;
+    }
     s->badwrite = false;
 
     rp2040_rosc_update_clock(s);
@@ -351,10 +389,21 @@ static const VMStateDescription rp2040_rosc_vmstate = {
         VMSTATE_UINT32(phase, RP2040RoscState),
         VMSTATE_UINT32(count, RP2040RoscState),
         VMSTATE_INT64(count_start_ns, RP2040RoscState),
+        VMSTATE_UINT64(random_pool, RP2040RoscState),
+        VMSTATE_UINT64(random_prng_state, RP2040RoscState),
+        VMSTATE_UINT64(random_seed, RP2040RoscState),
+        VMSTATE_UINT8(random_pool_bits, RP2040RoscState),
+        VMSTATE_BOOL(random_seed_set, RP2040RoscState),
         VMSTATE_BOOL(badwrite, RP2040RoscState),
         VMSTATE_CLOCK(clk, RP2040RoscState),
         VMSTATE_END_OF_LIST()
     }
+};
+
+static const Property rp2040_rosc_properties[] = {
+    DEFINE_PROP_UINT64("random-seed", RP2040RoscState, random_seed, 0),
+    DEFINE_PROP_BOOL("random-seed-set", RP2040RoscState, random_seed_set,
+                     false),
 };
 
 static void rp2040_rosc_class_init(ObjectClass *klass, const void *data)
@@ -363,6 +412,7 @@ static void rp2040_rosc_class_init(ObjectClass *klass, const void *data)
 
     device_class_set_legacy_reset(dc, rp2040_rosc_reset);
     dc->vmsd = &rp2040_rosc_vmstate;
+    device_class_set_props(dc, rp2040_rosc_properties);
 }
 
 static const TypeInfo rp2040_rosc_info = {
