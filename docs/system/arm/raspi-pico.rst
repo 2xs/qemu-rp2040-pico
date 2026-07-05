@@ -26,16 +26,60 @@ Supported devices
 -----------------
 
  * Two Cortex-M0+ cores. With QEMU's synthetic ROM, core 1 starts in ROM and
-   waits for the SDK FIFO launch sequence. With an external ROM image,
-   ``PSM.FRCE_OFF.PROC1`` can power core 1 on at the ROM reset vector, and the
-   local Pico SDK smoke tests cover this path with ``pipico.rom``.
+   waits for the SDK FIFO launch sequence. With an external ROM image, the
+   modeled ``PSM.FRCE_OFF.PROC1`` path can release core 1 at the ROM reset
+   vector, but the external-ROM multicore flow remains a bring-up path.
  * 16 KiB boot ROM window
  * 264 KiB SRAM
- * 2 MiB external flash contents mapped through the XIP window
- * Minimal clock generator and crystal oscillator registers
- * Minimal PLL_SYS and PLL_USB registers
- * Minimal reset controller registers
- * UART0 console
+ * 2 MiB external flash contents mapped through the XIP window and XIP alias
+   windows
+ * XIP/SSI flash command path for read, page program, sector erase, unique ID,
+   XIP stream and SDK-style SSI RX DMA reads
+ * Clock generator, crystal oscillator, ring oscillator, PLL_SYS and PLL_USB
+   programmer-visible registers
+ * Reset controller, PSM, watchdog, timer, SYSINFO, SYSCFG, TBMAN,
+   VREG_AND_CHIP_RESET and BUSCTRL programmer-visible registers
+ * SIO core ID, inter-core FIFO, spinlocks, divider and interpolators
+ * DMA engine with memory, UART, XIP stream, XIP/SSI RX and timer DREQ support
+ * IO_BANK0, IO_QSPI, PADS_BANK0 and PADS_QSPI shallow pin-control models
+ * UART0 and UART1 through QEMU serial backends
+ * USB DPRAM and shallow USBCTRL_REGS storage, without USB packet-level
+   emulation
+
+Unsupported or shallow devices
+------------------------------
+
+This machine is not a complete RP2040 model.  The following blocks are not
+implemented, or are only present as shallow register storage:
+
+ * PIO state machines, instruction execution, FIFOs, IRQs and DMA pacing are
+   not implemented.
+ * USB device, USB host, endpoint state machines and BOOTSEL mass-storage
+   programming are not implemented.  The model only provides USB DPRAM and
+   shallow ``USBCTRL_REGS`` storage for firmware that probes early USB state.
+ * SPI0, SPI1, I2C0, I2C1, PWM, ADC and the temperature sensor are not
+   implemented.
+ * The RTC block is not implemented.
+ * General GPIO electrical behaviour, pad-level input sampling, edge
+   detection, external pin wiring and alternate UART pin mappings are not
+   implemented.  IO_BANK0 is sufficient for function-select storage and for
+   gating the supported UART0/UART1 pins.
+ * The XIP cache is not modeled.  XIP aliases are functional views of the same
+   flash storage, but cache hit/miss counters and cache allocation behaviour
+   are not timing-accurate.
+ * QEMU's normal gdbstub can debug the emulated Cortex-M0+ CPUs.  The RP2040
+   SWD/debug fabric itself is not implemented: debug pause inputs and
+   ``DBGFORCE``-style registers are stored where useful, but they do not model
+   an external SWD probe connected to the chip.
+ * DMA is implemented for the paths listed above, but DREQ sources belonging
+   to unimplemented peripherals do not transfer data.
+ * The synthetic ROM is a supported QEMU execution path for running Pico
+   firmware.  It sometimes uses QEMU-only pseudo-device shortcuts to produce
+   the same architectural result quickly, notably for boot ROM helper calls
+   around floating-point routines and flash operations.  The external mask ROM
+   path is also available through ``-bios`` for user-provided RP2040 ROM
+   images such as ``pipico.rom``; QEMU does not ship that ROM image, and USB
+   BOOTSEL mass-storage mode is not implemented.
 
 Boot options
 ------------
@@ -46,7 +90,18 @@ accepted, with raw images loaded at ``0x10000000`` as a fallback:
 
 .. code-block:: bash
 
-  $ qemu-system-arm -machine raspi-pico -kernel firmware.bin -serial stdio
+  $ qemu-system-arm -machine raspi-pico -kernel firmware.elf -serial stdio
+
+The same option accepts the UF2 image normally copied to the Pico's BOOTSEL
+USB mass-storage device:
+
+.. code-block:: bash
+
+  $ qemu-system-arm -machine raspi-pico -kernel firmware.uf2 -serial stdio
+
+QEMU does not emulate the Pico BOOTSEL USB mass-storage programming mode.  A
+UF2 file is loaded directly by ``-kernel``; guest firmware cannot receive a
+UF2 through an emulated USB drive.
 
 The machine also accepts a raw initial flash image:
 
@@ -59,8 +114,10 @@ state, ``0xff``.
 
 If both ``flash-file`` and ``-kernel`` are specified, the raw flash file is
 loaded first, then the ``-kernel`` image is overlaid into the emulated XIP
-flash.  The complete emulated flash image is written back to the raw file, so
-a later run with only ``flash-file`` restarts from the overlaid image.
+flash.  Only the flash ranges covered by the ELF, UF2 or raw image are
+replaced; the rest of the existing raw flash contents are preserved.  The
+complete emulated flash image is written back to the raw file, so a later run
+with only ``flash-file`` restarts from the overlaid image.
 Successful guest sector erase and page program commands are also written back
 to the raw file.
 
@@ -85,6 +142,22 @@ be requested with:
 
   $ qemu-system-arm -machine raspi-pico,rosc-random-seed=0x1234 \
       -kernel firmware.elf -serial stdio
+
+Debugging with GDB uses QEMU's normal gdbstub.  For example:
+
+.. code-block:: bash
+
+  $ qemu-system-arm -machine raspi-pico -kernel firmware.elf \
+      -serial stdio -S -gdb tcp::1234
+
+Then connect an ARM embedded GDB:
+
+.. code-block:: bash
+
+  (gdb) target remote :1234
+
+This debugs the emulated Cortex-M0+ CPU through QEMU.  It does not emulate
+the RP2040 SWD debug port or an external SWD probe.
 
 Pico UF2 images can be converted to this raw flash format with:
 
@@ -121,49 +194,22 @@ absolute address, register offset, access size and write value.  The XIP/SSI
 register block also logs APB register accesses through the same ``unimp`` log
 mask, without logging every normal XIP instruction fetch.
 
-At the current level of emulation, the RFC ``pipico.rom`` image reaches its
-reset handler and progresses through the first clock setup loops.  The earlier
-tight polling loop on ``rp2040.clocks`` offset ``0x44`` (``0x40008044``)
-and the XOSC stability poll on ``rp2040.xosc`` offset ``0x04``
-(``0x40024004``) now complete.  The reset-done poll on ``rp2040.resets``
-offset ``0x08`` (``0x4000c008``) also completes.  The current observed tight
-polling loop on ``rp2040.pll_sys`` offset ``0x00`` (``0x40028000``) also
-completes.  The ROM then switches ``clk_sys`` to the PLL path, writes
-watchdog scratch registers, and clears ``XIP_CTRL.CTRL.EN`` through the
-atomic clear alias at ``0x14003000``.  The USB controller DPRAM is backed by
-the documented 4 KiB RAM window at ``0x50100000``.  ``USBCTRL_REGS`` has a
-shallow register-store model for the registers touched by the ROM, including
-the RP2040 atomic aliases.  ``SYSINFO`` returns stable chip/platform values,
-and ``SYSCFG`` stores the processor NMI/configuration registers touched by the
-ROM.  ``PROC0_NMI_MASK`` reroutes connected interrupt sources to the
-Cortex-M0+ NMI input, and ``MEMPOWERDOWN`` disables ROM, SRAM bank and USB
-DPRAM windows by returning memory transaction errors.  ``VREG_AND_CHIP_RESET``
-exposes the voltage-regulator, brown-out detector and chip reset status
-registers with stable shallow behaviour.  ``TBMAN.PLATFORM`` reports the
-documented ASIC platform bit.  ``SIO`` implements the core ID, the user and
-QSPI GPIO output/output-enable registers, 8-entry inter-core FIFOs,
-``VLD``/``RDY``/``ROE``/``WOF`` FIFO status, proc0/proc1 FIFO IRQ outputs, and
-hardware spinlock claim/release semantics.  Core1 is instantiated. With the
-synthetic ROM, it starts at reset, reads ``SIO_CPUID``, and waits in ROM for
-the Pico SDK FIFO sequence ``{0, 0, 1, VTOR, SP, PC}``, echoing each received
-word.  After a valid sequence, the synthetic ROM installs the supplied
-``VTOR`` and main stack pointer, then branches to the supplied entry point.
-With an external ROM image, proc1 is initially powered off and is started
-through the modeled ``PSM.FRCE_OFF.PROC1`` path at the ROM reset vector.
-``PSM`` exposes the force-on, force-off, watchdog-select and done registers
-touched by the Pico SDK core1 reset path; ``FRCE_OFF_PROC1`` is stored,
-reflected in ``DONE``, and used to hold or release proc1.  The SIO divider and
-inter-core FIFO paths are implemented.  SIO interpolators implement the
-normal shift/mask/sign datapaths, ``PEEK``/``POP`` accumulator updates,
-``CROSS_INPUT``/``CROSS_RESULT``, ``ADD_RAW``, ``FORCE_MSB``, ``BASE_1AND0``,
-INTERP0 blend mode and INTERP1 clamp mode.
+Most early boot polls that were useful during bring-up are now handled by
+the corresponding shallow device models: clocks, XOSC, PLLs, reset
+controller, watchdog scratch registers, XIP control aliases, USB DPRAM and
+USBCTRL_REGS, SYSINFO, SYSCFG, VREG_AND_CHIP_RESET, TBMAN, PSM, SIO and the
+QSPI IO path.  New ``LOG_UNIMP`` messages from this command are therefore a
+signal that the external mask-ROM path has reached a peripheral or register
+that is still outside the modeled subset.
 
-A local Pico SDK smoke test using ``multicore_launch_core1()`` has been used
-to validate this synthetic ROM core1 launch path.  Additional local SDK smoke
-tests cover boot ROM bit/memory/float/double helper lookups, DMA copy/fill
-transfers, and flash-safe multicore execution.  The in-tree functional tests
-keep the resulting coverage self-contained by reproducing the relevant SDK
-sequences without depending on the SDK.
+The external ``-bios`` path is intended for hardware-compatibility bring-up
+and for comparing the synthetic ROM against the real RP2040 boot ROM flow.
+It is more sensitive to missing low-level hardware details than the synthetic
+ROM path, and QEMU does not ship the ``pipico.rom`` image.
+
+The in-tree functional tests keep coverage self-contained by reproducing the
+important SDK sequences without depending on the Pico SDK or on a
+user-provided mask ROM image.
 
 Clock and XOSC model
 --------------------
@@ -303,14 +349,18 @@ bus reads to the 16 MiB XIP window starting at ``0x10000000`` are translated
 by the XIP hardware into external serial flash transfers.  The XIP block also
 contains a 16 KiB cache and several aliases with different cache behaviour.
 See datasheet pages 122 to 124.  The current QEMU model implements the main
-XIP window needed by firmware execution and leaves cache timing and cache
-aliases for later work.
+XIP window and the ``NOALLOC``, ``NOCACHE`` and ``NOCACHE_NOALLOC`` aliases as
+functional views of the same flash storage, while leaving cache timing for
+later work.
 
 The RP2040 XIP path is backed by the SSI controller.  The datasheet describes
 the SSI as a Synopsys DW_apb_ssi controller connected to the QSPI pins and
 forming part of the XIP block.  It can be configured to issue common serial
 flash read sequences, including the standard ``0x03`` read command with a
-24-bit address.  See datasheet pages 567 to 569.
+24-bit address and the continuation-read path used by the Pico SDK
+``flash/ssi_dma`` example.  The SSI DMA registers are modeled sufficiently for
+RX DMA pacing from ``SSI_DR0`` through ``DREQ_XIP_SSIRX``.  See datasheet
+pages 567 to 569.
 
 The synthetic boot ROM keeps the ROM, SDK and hardware responsibilities
 separate.  The SIO model provides inter-core FIFOs, FIFO IRQs and spinlocks;
@@ -345,21 +395,26 @@ firmware test calls ``exit(status)``.  When QEMU's ARM M-profile ``BKPT``
 handling is routed to an attached gdbstub, the debugger sees the breakpoint
 first and this synthetic HardFault exit path is not used.
 
-Fuller hardware-compatibility testing should use the external ``pipico.rom``
-mask ROM path.  That path is intentionally closer to the real boot ROM flow:
-firmware reaches the ROM supplied by the RFC artifact and flash operations
-exercise the emulated RP2040 peripherals more directly, including SIO/FIFO
-coordination, IO_QSPI/XIP state and SSI flash commands as the model grows.
-This is expected to be less convenient for small CI smoke tests, but it is the
-preferred path for validating behaviour that depends on the real ROM's
-hardware interactions.
+The external ``pipico.rom`` mask ROM path executes a user-provided RP2040
+boot ROM image through ``-bios``.  It is useful when validating behaviour that
+depends on the real ROM's hardware interactions, provided the ROM stays within
+the subset of RP2040 hardware modeled by QEMU.  It is not a USB BOOTSEL
+emulation path: guest-visible USB mass-storage programming is outside the
+current model.
+
+The synthetic ROM is also a valid QEMU execution path.  It is designed for
+running Pico firmware efficiently and repeatably under QEMU, and it may use
+QEMU-only pseudo-device services when they produce the same guest-visible
+architectural result more simply than stepping through the real ROM and the
+low-level hardware sequence.  The floating-point boot ROM helpers and the
+atomic synthetic flash helper path are examples of these shortcuts.
 
 The lower-level SSI/XIP command path remains responsible for modelling serial
 flash command state and for raising the documented QEMU HardFault policy when
-guest code executes from XIP while the flash model is busy.  Tests that need
-that busy/fault behaviour should target the SSI/XIP model directly or use the
-``pipico.rom`` path once the relevant ROM/hardware interaction is supported,
-rather than relying on the synthetic ROM's atomic helper shortcuts.
+guest code executes from XIP while the flash model is busy.  Tests for that
+busy/fault behaviour target the SSI/XIP model directly, or the ``pipico.rom``
+path once the relevant ROM/hardware interaction is supported, rather than the
+synthetic ROM's atomic helper shortcuts.
 
 For software-driven flash operations, firmware programs the SSI through its
 APB register interface at ``XIP_SSI_BASE``.  The important registers for the
@@ -371,8 +426,9 @@ See datasheet pages 597 to 602.
 Flash programming policy
 ------------------------
 
-The emulation should model flash programming through the RP2040 XIP/SSI path,
-not as a board-private back door.  The minimal command set is:
+The emulation models guest-visible flash programming through the RP2040
+XIP/SSI path rather than as a board-private back door.  The implemented
+minimal command set is:
 
  * ``0x06`` write enable
  * ``0x05`` read status
@@ -427,8 +483,15 @@ the Pico SDK uses them when configuring UART registers.  ``UARTDMACR`` drives
 UART0 and UART1 TX/RX DREQ lines into the RP2040 DMA model.
 
 The console path uses QEMU's standard serial backends, so the host side can
-still be selected with the usual ``-serial`` or ``-chardev`` options.  By
-default, the Pico machine requires the guest to route UARTs through
+still be selected with the usual ``-serial`` or ``-chardev`` options.  UART0
+uses the first serial backend and UART1 uses the second one, for example:
+
+.. code-block:: bash
+
+  $ qemu-system-arm -machine raspi-pico -kernel firmware.elf \
+      -serial stdio -serial tcp:127.0.0.1:1234,server,nowait
+
+By default, the Pico machine requires the guest to route UARTs through
 ``IO_BANK0`` first: GPIO0/GPIO1 must have ``FUNCSEL=UART`` before UART0 host
 serial transmit/receive is connected, and GPIO4/GPIO5 do the same for UART1.
 This catches firmware that writes UART registers but forgets the Pico GPIO
@@ -459,13 +522,12 @@ Known limitations
  * Core 0 runs normally.  Core 1 starts in the synthetic ROM, echoes the
    SDK-compatible FIFO launch sequence, installs the provided ``VTOR``/stack,
    and branches to the provided entry point.  With an external mask ROM,
-   ``PSM.FRCE_OFF.PROC1`` can start core 1 at the ROM reset vector; this path
-   is validated by local Pico SDK smoke tests with ``pipico.rom`` but is not
-   yet mirrored by an in-tree no-SDK regression.
- * UART0 and UART1 currently use QEMU's PL011 model with the RP2040 compatibility
-   policy documented above.  The strict pin check currently covers the Pico
-   GPIO0/GPIO1 UART0 path and GPIO4/GPIO5 UART1 path only; alternate RP2040
-   UART pin mappings remain future work.
+   ``PSM.FRCE_OFF.PROC1`` can release core 1 at the ROM reset vector, but the
+   external-ROM core1 boot flow is not yet covered by an in-tree regression.
+ * UART0 and UART1 currently use QEMU's PL011 model with the RP2040
+   compatibility policy documented above.  The strict pin check currently
+   covers the Pico GPIO0/GPIO1 UART0 path and GPIO4/GPIO5 UART1 path only;
+   alternate RP2040 UART pin mappings remain future work.
  * ``IO_BANK0`` stores GPIO function-select, override and interrupt registers,
    implements RP2040 atomic aliases, and gates UART host serial I/O for the
    GPIO0/GPIO1 UART0 path and GPIO4/GPIO5 UART1 path.  It is still a
@@ -487,6 +549,9 @@ Known limitations
    execution works, but cache-performance measurements are not meaningful in
    this emulation.  The XIP streaming FIFO is modeled functionally for direct
    reads and DMA from ``XIP_AUX_BASE``, but without flash idle-cycle timing.
+   The SSI bulk RX path used by the SDK ``ssi_dma`` example is also modeled
+   functionally, including the 32-bit byte order expected with DMA ``BSWAP``,
+   but it does not model serial-clock throughput or FIFO refill latency.
    The XIP control and SSI APB register blocks do handle the RP2040 atomic
    ``XOR``/``SET``/``CLR`` aliases.
  * The external flash unique ID is modeled as an 8-byte QEMU property exposed
@@ -501,11 +566,14 @@ Known limitations
  * ``BUSCTRL`` performance counters are software-visible counters, not real
    bus-fabric event counters.  They are sufficient for SDK entropy paths but
    not for measuring emulated bus contention.
- * The boot ROM flow is still a bring-up path and is not yet a faithful
-   RP2040 mask ROM execution model.  The synthetic ROM supports the direct
-   boot2/application launch path and the core1 FIFO launch sequence, but not
-   every RP2040 boot ROM function table entry; unsupported entries report an
-   explicit QEMU ``LOG_UNIMP`` diagnostic before faulting.
+ * The synthetic ROM supports the direct boot2/application launch path and the
+   core1 FIFO launch sequence, but not every RP2040 boot ROM function table
+   entry; unsupported entries report an explicit QEMU ``LOG_UNIMP`` diagnostic
+   before faulting.  The external ``-bios`` path can run a user-provided real
+   RP2040 mask ROM image, but it is limited by the same missing peripheral
+   models as the rest of the machine, notably USB BOOTSEL mass-storage mode.
+ * QEMU does not emulate the Pico BOOTSEL USB mass-storage programming mode.
+   UF2 images are accepted only as host-loaded ``-kernel`` inputs.
  * USB, PIO and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.  DMA supports memory-to-memory

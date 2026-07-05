@@ -1720,6 +1720,13 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 1, RP2040_XIP_CTRL_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 2, RP2040_XIP_SSI_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 3, RP2040_XIP_AUX_BASE);
+    memory_region_add_subregion(get_system_memory(), RP2040_XIP_NOALLOC_BASE,
+                                &s->xip.xip_noalloc);
+    memory_region_add_subregion(get_system_memory(), RP2040_XIP_NOCACHE_BASE,
+                                &s->xip.xip_nocache);
+    memory_region_add_subregion(get_system_memory(),
+                                RP2040_XIP_NOCACHE_NOALLOC_BASE,
+                                &s->xip.xip_nocache_noalloc);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->busctrl), errp)) {
         return;

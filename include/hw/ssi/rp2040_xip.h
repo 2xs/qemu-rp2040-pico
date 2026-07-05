@@ -26,6 +26,9 @@ struct RP2040XipState {
     SysBusDevice parent_obj;
 
     MemoryRegion xip;
+    MemoryRegion xip_noalloc;
+    MemoryRegion xip_nocache;
+    MemoryRegion xip_nocache_noalloc;
     MemoryRegion ctrl;
     MemoryRegion ssi;
     MemoryRegion aux;
@@ -48,6 +51,9 @@ struct RP2040XipState {
     uint32_t txftlr;
     uint32_t rxftlr;
     uint32_t imr;
+    uint32_t dmacr;
+    uint32_t dmatdlr;
+    uint32_t dmardlr;
     uint32_t rx_sample_dly;
     uint32_t spi_ctrlr0;
 
@@ -62,6 +68,8 @@ struct RP2040XipState {
     uint8_t rx[16];
     unsigned rx_len;
     unsigned rx_pos;
+    uint32_t ssi_bulk_addr;
+    uint32_t ssi_bulk_remaining;
 
     uint32_t stream_addr;
     uint32_t stream_ctr;

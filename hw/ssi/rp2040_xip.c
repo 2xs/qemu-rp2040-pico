@@ -77,6 +77,10 @@
 #define FLASH_CMD_READ_UNIQUE_ID 0x4b
 #define FLASH_CMD_SECTOR_ERASE 0x20
 #define FLASH_CMD_QUAD_IO_READ 0xeb
+#define FLASH_CMD_CONTINUATION_READ 0xa0
+
+#define RP2040_SSI_DMACR_TDMAE BIT(1)
+#define RP2040_SSI_DMACR_RDMAE BIT(0)
 
 #define FLASH_UNIQUE_ID_SIZE 8
 #define FLASH_UNIQUE_ID_DUMMY_BYTES 4
@@ -145,6 +149,79 @@ static void rp2040_xip_rx_push(RP2040XipState *s, uint8_t value)
     }
 }
 
+static bool rp2040_xip_rx_compact(RP2040XipState *s)
+{
+    if (s->rx_len == s->rx_pos) {
+        rp2040_xip_rx_clear(s);
+        return true;
+    }
+    if (s->rx_pos > 0) {
+        memmove(s->rx, s->rx + s->rx_pos, s->rx_len - s->rx_pos);
+        s->rx_len -= s->rx_pos;
+        s->rx_pos = 0;
+        return true;
+    }
+    return false;
+}
+
+static bool rp2040_xip_flash_word(RP2040XipState *s, uint32_t addr,
+                                  uint32_t *value)
+{
+    if (s->flash_size < sizeof(uint32_t) ||
+        addr > s->flash_size - sizeof(uint32_t)) {
+        *value = 0xffffffff;
+        return false;
+    }
+
+    *value = ldl_le_p(s->storage + addr);
+    return true;
+}
+
+static void rp2040_xip_rx_push_ssi_word(RP2040XipState *s, uint32_t value)
+{
+    if (ARRAY_SIZE(s->rx) - (s->rx_len - s->rx_pos) < sizeof(uint32_t)) {
+        rp2040_xip_rx_compact(s);
+    }
+    if (ARRAY_SIZE(s->rx) - s->rx_len < sizeof(uint32_t)) {
+        return;
+    }
+
+    /*
+     * Non-XIP 32-bit SSI reads deliver the serial flash byte stream in the
+     * opposite byte order expected by the RP2040 system bus; SDK users enable
+     * DMA BSWAP when copying words from SSI_DR0.
+     */
+    s->rx[s->rx_len++] = extract32(value, 24, 8);
+    s->rx[s->rx_len++] = extract32(value, 16, 8);
+    s->rx[s->rx_len++] = extract32(value, 8, 8);
+    s->rx[s->rx_len++] = extract32(value, 0, 8);
+    qemu_irq_pulse(s->dreq_rx);
+}
+
+static void rp2040_xip_ssi_bulk_fill(RP2040XipState *s)
+{
+    while (s->ssi_bulk_remaining > 0 &&
+           ARRAY_SIZE(s->rx) - (s->rx_len - s->rx_pos) >=
+           sizeof(uint32_t)) {
+        uint32_t value;
+
+        rp2040_xip_rx_compact(s);
+        rp2040_xip_flash_word(s, s->ssi_bulk_addr, &value);
+        rp2040_xip_rx_push_ssi_word(s, value);
+        s->ssi_bulk_addr += sizeof(uint32_t);
+        s->ssi_bulk_remaining--;
+    }
+}
+
+static void rp2040_xip_ssi_bulk_start(RP2040XipState *s, uint32_t addr,
+                                      uint32_t words)
+{
+    rp2040_xip_rx_clear(s);
+    s->ssi_bulk_addr = addr;
+    s->ssi_bulk_remaining = words;
+    rp2040_xip_ssi_bulk_fill(s);
+}
+
 static void rp2040_xip_update_stream_dreq(RP2040XipState *s)
 {
     qemu_set_irq(s->dreq_stream, s->stream_fifo_len > s->stream_fifo_pos);
@@ -161,8 +238,12 @@ static uint32_t rp2040_xip_stream_word(RP2040XipState *s)
 {
     uint32_t off;
 
+    if (s->flash_size < sizeof(uint32_t)) {
+        return 0xffffffff;
+    }
     if (s->stream_addr < RP2040_XIP_FLASH_BASE ||
-        s->stream_addr - RP2040_XIP_FLASH_BASE > s->flash_size - 4) {
+        s->stream_addr - RP2040_XIP_FLASH_BASE >
+        s->flash_size - sizeof(uint32_t)) {
         return 0xffffffff;
     }
 
@@ -253,6 +334,7 @@ static void rp2040_xip_reset_tx(RP2040XipState *s)
 {
     s->tx_len = 0;
     s->tx_unsupported_logged = false;
+    s->ssi_bulk_remaining = 0;
 }
 
 static bool rp2040_xip_writeback(RP2040XipState *s, Error **errp)
@@ -535,10 +617,10 @@ static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
     }
 }
 
-static MemTxResult rp2040_xip_read(void *opaque, hwaddr addr, uint64_t *data,
-                                   unsigned size, MemTxAttrs attrs)
+static MemTxResult rp2040_xip_read_common(RP2040XipState *s, hwaddr addr,
+                                          uint64_t *data, unsigned size,
+                                          bool synthetic_vector_overlay)
 {
-    RP2040XipState *s = opaque;
     uint64_t value = 0;
     unsigned i;
 
@@ -554,7 +636,8 @@ static MemTxResult rp2040_xip_read(void *opaque, hwaddr addr, uint64_t *data,
          * Synthetic ROM CI exit support: let firmware copy a HardFault vector
          * that points back into ROM without mutating persistent flash storage.
          */
-        if (s->synthetic_hardfault_vector_enabled &&
+        if (synthetic_vector_overlay &&
+            s->synthetic_hardfault_vector_enabled &&
             cur >= RP2040_BOOT2_SIZE + 0x0c &&
             cur < RP2040_BOOT2_SIZE + 0x10) {
             byte = extract32(s->synthetic_hardfault_vector,
@@ -564,6 +647,19 @@ static MemTxResult rp2040_xip_read(void *opaque, hwaddr addr, uint64_t *data,
     }
     *data = value;
     return MEMTX_OK;
+}
+
+static MemTxResult rp2040_xip_read(void *opaque, hwaddr addr, uint64_t *data,
+                                   unsigned size, MemTxAttrs attrs)
+{
+    return rp2040_xip_read_common(opaque, addr, data, size, true);
+}
+
+static MemTxResult rp2040_xip_alias_read(void *opaque, hwaddr addr,
+                                         uint64_t *data, unsigned size,
+                                         MemTxAttrs attrs)
+{
+    return rp2040_xip_read_common(opaque, addr, data, size, false);
 }
 
 static MemTxResult rp2040_xip_write(void *opaque, hwaddr addr, uint64_t data,
@@ -689,14 +785,24 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
     uint64_t ret;
 
     if (offset >= RP2040_SSI_DR0 && offset <= RP2040_SSI_DR_END) {
-        if (s->rx_pos < s->rx_len) {
-            value = s->rx[s->rx_pos++];
+        unsigned i;
+
+        ret = 0;
+        for (i = 0; i < size; i++) {
             if (s->rx_pos == s->rx_len) {
                 rp2040_xip_rx_clear(s);
+                rp2040_xip_ssi_bulk_fill(s);
             }
-            ret = value;
-        } else {
-            ret = 0;
+            if (s->rx_pos < s->rx_len) {
+                value = s->rx[s->rx_pos++];
+            } else {
+                value = 0;
+            }
+            ret |= (uint64_t)value << (i * 8);
+        }
+        if (s->rx_pos == s->rx_len) {
+            rp2040_xip_rx_clear(s);
+            rp2040_xip_ssi_bulk_fill(s);
         }
         return ret;
     }
@@ -751,11 +857,13 @@ static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
         ret = 0;
         break;
     case RP2040_SSI_DMACR:
+        ret = s->dmacr;
+        break;
     case RP2040_SSI_DMATDLR:
-        ret = 0;
+        ret = s->dmatdlr;
         break;
     case RP2040_SSI_DMARDLR:
-        ret = 4;
+        ret = s->dmardlr;
         break;
     case RP2040_SSI_IDR:
         ret = 0;
@@ -797,6 +905,10 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
         if (s->tx_len < 8 || (s->tx_len & 0x3f) == 0) {
             trace_rp2040_xip_dr_write(value, size, s->tx_len, s->ctrlr0,
                                       s->ctrlr1, s->spi_ctrlr0);
+        }
+        if (size == 4 && (value & 0xff) == FLASH_CMD_CONTINUATION_READ) {
+            rp2040_xip_ssi_bulk_start(s, value >> 8, s->ctrlr1 + 1);
+            return;
         }
         rp2040_xip_dr_write(s, value & 0xff);
         return;
@@ -847,6 +959,17 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
         new_value = rp2040_xip_apply_alias(s->imr, value, alias);
         s->imr = new_value & 0x3f;
         break;
+    case RP2040_SSI_DMACR:
+        new_value = rp2040_xip_apply_alias(s->dmacr, value, alias);
+        s->dmacr = new_value & (RP2040_SSI_DMACR_TDMAE |
+                                RP2040_SSI_DMACR_RDMAE);
+        break;
+    case RP2040_SSI_DMATDLR:
+        s->dmatdlr = rp2040_xip_apply_alias(s->dmatdlr, value, alias) & 0xff;
+        break;
+    case RP2040_SSI_DMARDLR:
+        s->dmardlr = rp2040_xip_apply_alias(s->dmardlr, value, alias) & 0xff;
+        break;
     case RP2040_SSI_RX_SAMPLE_DLY:
         s->rx_sample_dly = rp2040_xip_apply_alias(s->rx_sample_dly, value,
                                                   alias) & 0xff;
@@ -868,6 +991,17 @@ static void rp2040_xip_ssi_write(void *opaque, hwaddr addr, uint64_t value,
 
 static const MemoryRegionOps rp2040_xip_ops = {
     .read_with_attrs = rp2040_xip_read,
+    .write_with_attrs = rp2040_xip_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 1,
+        .max_access_size = 4,
+        .unaligned = true,
+    },
+};
+
+static const MemoryRegionOps rp2040_xip_alias_ops = {
+    .read_with_attrs = rp2040_xip_alias_read,
     .write_with_attrs = rp2040_xip_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
@@ -1233,6 +1367,15 @@ static void rp2040_xip_realize(DeviceState *dev, Error **errp)
 
     memory_region_init_io(&s->xip, OBJECT(dev), &rp2040_xip_ops, s,
                           "rp2040.xip", s->flash_size);
+    memory_region_init_io(&s->xip_noalloc, OBJECT(dev),
+                          &rp2040_xip_alias_ops, s, "rp2040.xip.noalloc",
+                          s->flash_size);
+    memory_region_init_io(&s->xip_nocache, OBJECT(dev),
+                          &rp2040_xip_alias_ops, s, "rp2040.xip.nocache",
+                          s->flash_size);
+    memory_region_init_io(&s->xip_nocache_noalloc, OBJECT(dev),
+                          &rp2040_xip_alias_ops, s,
+                          "rp2040.xip.nocache-noalloc", s->flash_size);
     memory_region_init_io(&s->ctrl, OBJECT(dev), &rp2040_xip_ctrl_ops, s,
                           "rp2040.xip.ctrl", RP2040_XIP_CTRL_SIZE);
     memory_region_init_io(&s->ssi, OBJECT(dev), &rp2040_xip_ssi_ops, s,
@@ -1259,6 +1402,9 @@ static void rp2040_xip_reset(DeviceState *dev)
     s->txftlr = 0;
     s->rxftlr = 0;
     s->imr = 0;
+    s->dmacr = 0;
+    s->dmatdlr = 0;
+    s->dmardlr = 4;
     s->rx_sample_dly = 0;
     s->spi_ctrlr0 = 0;
     s->write_enable = false;
