@@ -64,6 +64,19 @@ a later run with only ``flash-file`` restarts from the overlaid image.
 Successful guest sector erase and page program commands are also written back
 to the raw file.
 
+The Pico SDK uses the external SPI NOR flash unique ID as the Pico 1 board
+identifier.  The emulated flash reports the stable default ID
+``3eb8a7493fcc0608``.  Tests that need a different board identity can override
+it with:
+
+.. code-block:: bash
+
+  $ qemu-system-arm -machine raspi-pico,flash-uid=0011223344556677 \
+      -kernel firmware.elf -serial stdio
+
+The flash UID is not stored in, nor appended to, ``flash-file``; that file
+remains the raw bytes of the guest-addressable flash array.
+
 The ring oscillator ``RANDOMBIT`` stream is backed by QEMU's guest-visible
 random source by default.  For reproducible tests, a deterministic stream can
 be requested with:
@@ -470,6 +483,9 @@ Known limitations
  * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
    XIP control and SSI APB register blocks do handle the RP2040 atomic
    ``XOR``/``SET``/``CLR`` aliases.
+ * The external flash unique ID is modeled as an 8-byte QEMU property exposed
+   through the SPI NOR ``0x4b`` RUID command.  It is stable by default and can
+   be overridden with ``flash-uid``; it is not persisted in ``flash-file``.
  * ``IO_QSPI`` stores pin-control and interrupt registers and forwards forced
    ``GPIO_QSPI_SS`` changes to the XIP/SSI model.  It does not emulate the
    electrical QSPI pads or a separate serial bus.

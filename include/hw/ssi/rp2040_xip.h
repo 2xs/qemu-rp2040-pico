@@ -29,6 +29,7 @@ struct RP2040XipState {
 
     uint32_t flash_size;
     char *flash_file;
+    uint64_t flash_uid;
     uint8_t *storage;
     bool xip_writable;
 

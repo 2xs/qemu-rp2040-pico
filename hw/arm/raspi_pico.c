@@ -27,6 +27,9 @@ struct RaspiPicoMachineState {
 
     RP2040State soc;
     char *flash_file;
+    char *flash_uid;
+    uint64_t flash_uid_value;
+    bool flash_uid_set;
     char *rosc_random_seed;
     uint64_t rosc_random_seed_value;
     bool rosc_random_seed_set;
@@ -47,6 +50,52 @@ static void raspi_pico_set_flash_file(Object *obj, const char *value,
 
     g_free(s->flash_file);
     s->flash_file = g_strdup(value);
+}
+
+static char *raspi_pico_get_flash_uid(Object *obj, Error **errp)
+{
+    RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
+
+    return g_strdup(s->flash_uid ?: "");
+}
+
+static void raspi_pico_set_flash_uid(Object *obj, const char *value,
+                                     Error **errp)
+{
+    RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
+    const char *p;
+    uint64_t uid;
+    int i;
+
+    if (!value || !*value) {
+        g_free(s->flash_uid);
+        s->flash_uid = NULL;
+        s->flash_uid_value = 0;
+        s->flash_uid_set = false;
+        return;
+    }
+
+    p = g_str_has_prefix(value, "0x") || g_str_has_prefix(value, "0X") ?
+        value + 2 : value;
+    if (strlen(p) != 16) {
+        error_setg(errp, "flash-uid must be exactly 16 hexadecimal digits");
+        return;
+    }
+    for (i = 0; i < 16; i++) {
+        if (!g_ascii_isxdigit(p[i])) {
+            error_setg(errp, "invalid flash-uid '%s'", value);
+            return;
+        }
+    }
+    if (qemu_strtou64(p, NULL, 16, &uid) < 0) {
+        error_setg(errp, "invalid flash-uid '%s'", value);
+        return;
+    }
+
+    g_free(s->flash_uid);
+    s->flash_uid = g_strdup(value);
+    s->flash_uid_value = uid;
+    s->flash_uid_set = true;
 }
 
 static char *raspi_pico_get_rosc_random_seed(Object *obj, Error **errp)
@@ -104,6 +153,10 @@ static void raspi_pico_init(MachineState *machine)
         qdev_prop_set_string(DEVICE(&s->soc.xip), "flash-file",
                              s->flash_file);
     }
+    if (s->flash_uid_set) {
+        qdev_prop_set_uint64(DEVICE(&s->soc.xip), "flash-uid",
+                             s->flash_uid_value);
+    }
     if (machine->firmware) {
         qdev_prop_set_string(DEVICE(&s->soc), "bootrom-file",
                              machine->firmware);
@@ -128,6 +181,7 @@ static void raspi_pico_machine_finalize(Object *obj)
     RaspiPicoMachineState *s = RASPI_PICO_MACHINE(obj);
 
     g_free(s->flash_file);
+    g_free(s->flash_uid);
     g_free(s->rosc_random_seed);
 }
 
@@ -172,6 +226,12 @@ static void raspi_pico_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "flash-file",
                                           "Load initial XIP flash contents "
                                           "from a raw host file");
+    object_class_property_add_str(oc, "flash-uid",
+                                  raspi_pico_get_flash_uid,
+                                  raspi_pico_set_flash_uid);
+    object_class_property_set_description(oc, "flash-uid",
+                                          "Set the emulated external flash "
+                                          "64-bit unique ID as 16 hex digits");
     object_class_property_add_str(oc, "rosc-random-seed",
                                   raspi_pico_get_rosc_random_seed,
                                   raspi_pico_set_rosc_random_seed);

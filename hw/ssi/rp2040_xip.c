@@ -63,8 +63,13 @@
 #define FLASH_CMD_READ_STATUS  0x05
 #define FLASH_CMD_READ_STATUS2 0x35
 #define FLASH_CMD_WRITE_ENABLE 0x06
+#define FLASH_CMD_READ_UNIQUE_ID 0x4b
 #define FLASH_CMD_SECTOR_ERASE 0x20
 #define FLASH_CMD_QUAD_IO_READ 0xeb
+
+#define FLASH_UNIQUE_ID_SIZE 8
+#define FLASH_UNIQUE_ID_DUMMY_BYTES 4
+#define FLASH_UID_DEFAULT 0x3eb8a7493fcc0608ull
 
 #define FLASH_STATUS_WIP 0x01
 #define FLASH_STATUS_WEL 0x02
@@ -151,6 +156,11 @@ static uint32_t rp2040_xip_tx_addr(RP2040XipState *s)
 static uint32_t rp2040_xip_quad_io_addr(RP2040XipState *s)
 {
     return (uint32_t)s->tx[1] << 16 | s->tx[2] << 8 | s->tx[3];
+}
+
+static uint8_t rp2040_xip_flash_uid_byte(RP2040XipState *s, unsigned index)
+{
+    return extract64(s->flash_uid, (FLASH_UNIQUE_ID_SIZE - 1 - index) * 8, 8);
 }
 
 static void rp2040_xip_finish_busy(RP2040XipState *s)
@@ -389,6 +399,16 @@ static void rp2040_xip_dr_write(RP2040XipState *s, uint8_t value)
         rp2040_xip_rx_push(s, 0);
         rp2040_xip_finish_busy(s);
         rp2040_xip_reset_tx(s);
+        break;
+    case FLASH_CMD_READ_UNIQUE_ID:
+        if (s->tx_len <= 1 + FLASH_UNIQUE_ID_DUMMY_BYTES) {
+            rp2040_xip_rx_push(s, 0);
+        } else {
+            unsigned index = s->tx_len - 2 - FLASH_UNIQUE_ID_DUMMY_BYTES;
+
+            rp2040_xip_rx_push(s, index < FLASH_UNIQUE_ID_SIZE ?
+                               rp2040_xip_flash_uid_byte(s, index) : 0);
+        }
         break;
     case FLASH_CMD_READ:
         if (s->tx_len <= 4) {
@@ -1137,6 +1157,8 @@ static void rp2040_xip_init(Object *obj)
 static const Property rp2040_xip_properties[] = {
     DEFINE_PROP_UINT32("flash-size", RP2040XipState, flash_size, 2 * MiB),
     DEFINE_PROP_STRING("flash-file", RP2040XipState, flash_file),
+    DEFINE_PROP_UINT64("flash-uid", RP2040XipState, flash_uid,
+                       FLASH_UID_DEFAULT),
 };
 
 static void rp2040_xip_class_init(ObjectClass *klass, const void *data)
