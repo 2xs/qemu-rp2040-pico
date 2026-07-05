@@ -152,13 +152,14 @@ static unsigned rp2040_dma_transfer_size(RP2040DmaChannel *ch)
     }
 }
 
-static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
-                                     unsigned chain_depth);
+static void rp2040_dma_request_start(RP2040DmaState *s, unsigned index);
 static void rp2040_dma_dreq(void *opaque, int n, int level);
 static void rp2040_dma_dreq_pulse(RP2040DmaState *s, uint32_t dreq);
 static void rp2040_dma_dreq_bh(void *opaque);
 static bool rp2040_dma_dreq_has_busy_channel(RP2040DmaState *s, uint32_t dreq,
                                              unsigned except);
+static void rp2040_dma_write_reg(RP2040DmaState *s, hwaddr addr,
+                                 uint64_t value64, unsigned size);
 
 static uint32_t rp2040_dma_treq(RP2040DmaChannel *ch)
 {
@@ -395,8 +396,7 @@ static uint32_t rp2040_dma_sniff_read_data(RP2040DmaState *s)
     return value;
 }
 
-static void rp2040_dma_finish_channel(RP2040DmaState *s, unsigned index,
-                                      unsigned chain_depth)
+static void rp2040_dma_finish_channel(RP2040DmaState *s, unsigned index)
 {
     RP2040DmaChannel *ch = &s->chan[index];
     uint32_t chain_to;
@@ -409,14 +409,13 @@ static void rp2040_dma_finish_channel(RP2040DmaState *s, unsigned index,
 
     chain_to = (ch->ctrl & DMA_CTRL_CHAIN_TO_MASK) >> DMA_CTRL_CHAIN_TO_SHIFT;
     if (!(ch->ctrl & DMA_CTRL_ERROR_MASK) &&
-        chain_to < RP2040_DMA_NUM_CHANNELS && chain_to != index &&
-        chain_depth < RP2040_DMA_NUM_CHANNELS) {
-        rp2040_dma_start_channel(s, chain_to, chain_depth + 1);
+        chain_to < RP2040_DMA_NUM_CHANNELS && chain_to != index) {
+        rp2040_dma_request_start(s, chain_to);
     }
 }
 
 static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
-                                 uint32_t beats, unsigned chain_depth)
+                                 uint32_t beats)
 {
     RP2040DmaChannel *ch = &s->chan[index];
     uint32_t count;
@@ -456,8 +455,20 @@ static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
         }
         rp2040_dma_sniff_update(s, index, buf, width);
 
-        result = address_space_rw(&s->dma_as, ch->write_addr,
-                                  MEMTXATTRS_UNSPECIFIED, buf, width, true);
+        if (ch->write_addr >= RP2040_DMA_BASE &&
+            ch->write_addr < RP2040_DMA_BASE + RP2040_DMA_SIZE) {
+            if (width == 4) {
+                rp2040_dma_write_reg(s, ch->write_addr - RP2040_DMA_BASE,
+                                     ldl_le_p(buf), width);
+                result = MEMTX_OK;
+            } else {
+                result = MEMTX_ERROR;
+            }
+        } else {
+            result = address_space_rw(&s->dma_as, ch->write_addr,
+                                      MEMTXATTRS_UNSPECIFIED, buf, width,
+                                      true);
+        }
         if (result != MEMTX_OK) {
             ch->ctrl |= DMA_CTRL_WRITE_ERROR | DMA_CTRL_AHB_ERROR;
             break;
@@ -469,17 +480,28 @@ static void rp2040_dma_run_beats(RP2040DmaState *s, unsigned index,
     }
 
     if ((ch->ctrl & DMA_CTRL_ERROR_MASK) || ch->trans_count == 0) {
-        rp2040_dma_finish_channel(s, index, chain_depth);
+        rp2040_dma_finish_channel(s, index);
     }
 }
 
-static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
-                                     unsigned chain_depth)
+static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index)
 {
     RP2040DmaChannel *ch = &s->chan[index];
     uint32_t treq;
 
-    if (!(ch->ctrl & DMA_CTRL_EN) || ch->trans_count == 0) {
+    if (!(ch->ctrl & DMA_CTRL_EN)) {
+        return;
+    }
+
+    if (ch->trans_count == 0 && ch->reload_count != 0) {
+        ch->trans_count = ch->reload_count;
+    }
+
+    if (ch->trans_count == 0) {
+        if (ch->ctrl & DMA_CTRL_IRQ_QUIET) {
+            s->intr |= BIT(index);
+            rp2040_dma_update_irq(s);
+        }
         return;
     }
 
@@ -489,7 +511,7 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
 
     treq = rp2040_dma_treq(ch);
     if (treq == RP2040_DREQ_FORCE || rp2040_dma_treq_is_ready_sink(treq)) {
-        rp2040_dma_run_beats(s, index, UINT32_MAX, chain_depth);
+        rp2040_dma_run_beats(s, index, UINT32_MAX);
     } else if ((rp2040_dma_treq_is_connected_level(treq) ||
                 treq == RP2040_DREQ_XIP_SSIRX) &&
                s->dreq_level[treq]) {
@@ -502,6 +524,32 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index,
                        "DREQ source is not connected yet");
         ch->paced_nyi_logged = true;
     }
+}
+
+static void rp2040_dma_drain_starts(RP2040DmaState *s)
+{
+    if (s->engine_active) {
+        return;
+    }
+
+    s->engine_active = true;
+    while (s->pending_start) {
+        unsigned index = ctz32(s->pending_start);
+
+        s->pending_start &= ~BIT(index);
+        rp2040_dma_start_channel(s, index);
+    }
+    s->engine_active = false;
+}
+
+static void rp2040_dma_request_start(RP2040DmaState *s, unsigned index)
+{
+    if (index >= RP2040_DMA_NUM_CHANNELS) {
+        return;
+    }
+
+    s->pending_start |= BIT(index);
+    rp2040_dma_drain_starts(s);
 }
 
 static void rp2040_dma_dreq_pulse(RP2040DmaState *s, uint32_t dreq)
@@ -551,7 +599,10 @@ static void rp2040_dma_dreq_bh(void *opaque)
                 RP2040DmaChannel *ch = &s->chan[i];
 
                 if ((ch->ctrl & DMA_CTRL_BUSY) && rp2040_dma_treq(ch) == dreq) {
-                    rp2040_dma_run_beats(s, i, 1, 0);
+                    s->engine_active = true;
+                    rp2040_dma_run_beats(s, i, 1);
+                    s->engine_active = false;
+                    rp2040_dma_drain_starts(s);
                 }
             }
             if (s->dreq_level[dreq] &&
@@ -643,7 +694,7 @@ static void rp2040_dma_write_ctrl(RP2040DmaState *s, unsigned index,
     }
     ch->ctrl = (value & DMA_CTRL_WRITABLE_MASK) | errors;
     if (trigger) {
-        rp2040_dma_start_channel(s, index, 0);
+        rp2040_dma_request_start(s, index);
     }
 }
 
@@ -660,7 +711,7 @@ static void rp2040_dma_write_channel(RP2040DmaState *s, unsigned index,
         break;
     case DMA_CH_AL3_READ_ADDR:
         ch->read_addr = value;
-        rp2040_dma_start_channel(s, index, 0);
+        rp2040_dma_request_start(s, index);
         break;
     case DMA_CH_WRITE_ADDR:
     case DMA_CH_AL1_WRITE_ADDR:
@@ -669,7 +720,7 @@ static void rp2040_dma_write_channel(RP2040DmaState *s, unsigned index,
         break;
     case DMA_CH_AL2_WRITE_ADDR:
         ch->write_addr = value;
-        rp2040_dma_start_channel(s, index, 0);
+        rp2040_dma_request_start(s, index);
         break;
     case DMA_CH_TRANS_COUNT:
     case DMA_CH_AL2_TRANS_COUNT:
@@ -680,7 +731,7 @@ static void rp2040_dma_write_channel(RP2040DmaState *s, unsigned index,
     case DMA_CH_AL1_TRANS_COUNT:
         ch->trans_count = value;
         ch->reload_count = value;
-        rp2040_dma_start_channel(s, index, 0);
+        rp2040_dma_request_start(s, index);
         break;
     case DMA_CH_CTRL_TRIG:
         rp2040_dma_write_ctrl(s, index, value, true);
@@ -757,10 +808,9 @@ static uint64_t rp2040_dma_read(void *opaque, hwaddr addr, unsigned size)
     return value;
 }
 
-static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
-                             unsigned size)
+static void rp2040_dma_write_reg(RP2040DmaState *s, hwaddr addr,
+                                 uint64_t value64, unsigned size)
 {
-    RP2040DmaState *s = opaque;
     hwaddr alias = addr & ATOMIC_ALIAS_MASK;
     hwaddr offset = addr & 0xfff;
     uint32_t value = value64;
@@ -813,7 +863,7 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
             value &= DMA_CHANNEL_MASK;
             for (i = 0; i < RP2040_DMA_NUM_CHANNELS; i++) {
                 if (value & BIT(i)) {
-                    rp2040_dma_start_channel(s, i, 0);
+                    rp2040_dma_request_start(s, i);
                 }
             }
             break;
@@ -844,6 +894,12 @@ static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
             break;
         }
     }
+}
+
+static void rp2040_dma_write(void *opaque, hwaddr addr, uint64_t value64,
+                             unsigned size)
+{
+    rp2040_dma_write_reg(opaque, addr, value64, size);
 }
 
 static const MemoryRegionOps rp2040_dma_ops = {
@@ -882,6 +938,8 @@ static void rp2040_dma_reset(DeviceState *dev)
     memset(s->dreq_level, 0, sizeof(s->dreq_level));
     memset(s->pending_dreq, 0, sizeof(s->pending_dreq));
     qemu_bh_cancel(s->dreq_bh);
+    s->engine_active = false;
+    s->pending_start = 0;
     s->sniff_ctrl = 0;
     s->sniff_data = 0;
     rp2040_dma_update_irq(s);

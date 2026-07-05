@@ -67,6 +67,8 @@ struct RP2040DmaState {
     uint32_t sniff_data;
     QEMUBH *dreq_bh;
     bool dreq_servicing;
+    bool engine_active;
+    uint32_t pending_start;
     bool dreq_level[RP2040_DMA_NUM_DREQS];
     uint32_t pending_dreq[RP2040_DMA_NUM_DREQS];
 };

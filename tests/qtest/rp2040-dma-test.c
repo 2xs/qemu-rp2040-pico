@@ -13,6 +13,10 @@
 #define DMA_CH_WRITE_ADDR       0x04
 #define DMA_CH_TRANS_COUNT      0x08
 #define DMA_CH_CTRL_TRIG        0x0c
+#define DMA_CH_AL1_CTRL         0x10
+#define DMA_CH_AL3_TRANS_COUNT  0x38
+#define DMA_CH_AL3_READ_ADDR    0x3c
+#define DMA_CH_SIZE             0x40
 #define DMA_INTR                0x400
 #define DMA_INTE0               0x404
 #define DMA_INTS0               0x40c
@@ -26,6 +30,7 @@
 #define DMA_CTRL_WRITE_ERROR    BIT(29)
 #define DMA_CTRL_BUSY           BIT(24)
 #define DMA_CTRL_SNIFF_EN       BIT(23)
+#define DMA_CTRL_IRQ_QUIET      BIT(21)
 #define DMA_CTRL_TREQ_SEL_SHIFT 15
 #define DMA_CTRL_CHAIN_TO_SHIFT 11
 #define DMA_CTRL_RING_SEL       BIT(10)
@@ -287,6 +292,65 @@ static void test_dma_timer_dreq(void)
     qtest_quit(qts);
 }
 
+static void test_dma_control_blocks(void)
+{
+    QTestState *qts = rp2040_start();
+    const uint8_t source[] = { 0x44, 0x4d, 0x41 };
+    uint8_t dest[sizeof(source)];
+    uint32_t blocks[] = {
+        sizeof(source), SRAM_BASE + 0x380,
+        0, 0,
+    };
+    uint32_t block_addr = SRAM_BASE + 0x300;
+    uint32_t read_addr = SRAM_BASE + 0x380;
+    uint32_t write_addr = SRAM_BASE + 0x390;
+    uint32_t chan1 = DMA_BASE + DMA_CH_SIZE;
+    uint32_t ctrl_chan_ctrl;
+    uint32_t data_chan_ctrl;
+
+    qtest_memwrite(qts, block_addr, blocks, sizeof(blocks));
+    qtest_memwrite(qts, read_addr, source, sizeof(source));
+
+    /*
+     * Channel 0 writes two 32-bit words into channel 1's alias 3
+     * TRANS_COUNT/READ_ADDR registers.  The second write triggers channel 1.
+     */
+    ctrl_chan_ctrl = DMA_CTRL_EN | DMA_CTRL_INCR_READ |
+                     DMA_CTRL_INCR_WRITE | DMA_CTRL_RING_SEL |
+                     DMA_CTRL_DATA_SIZE_32 |
+                     (3 << DMA_CTRL_RING_SIZE_SHIFT) |
+                     (DREQ_FORCE << DMA_CTRL_TREQ_SEL_SHIFT);
+
+    /*
+     * Channel 1 copies the configured block and chains back to channel 0.
+     * The final zero-length control block sets channel 1's interrupt via
+     * IRQ_QUIET, matching the SDK control_blocks example's termination.
+     */
+    data_chan_ctrl = DMA_CTRL_EN | DMA_CTRL_INCR_READ |
+                     DMA_CTRL_INCR_WRITE | DMA_CTRL_IRQ_QUIET |
+                     (DREQ_FORCE << DMA_CTRL_TREQ_SEL_SHIFT) |
+                     (0 << DMA_CTRL_CHAIN_TO_SHIFT);
+
+    qtest_writel(qts, chan1 + DMA_CH_WRITE_ADDR, write_addr);
+    qtest_writel(qts, chan1 + DMA_CH_AL1_CTRL, data_chan_ctrl);
+
+    qtest_writel(qts, DMA_BASE + DMA_CH_READ_ADDR, block_addr);
+    qtest_writel(qts, DMA_BASE + DMA_CH_WRITE_ADDR,
+                 chan1 + DMA_CH_AL3_TRANS_COUNT);
+    qtest_writel(qts, DMA_BASE + DMA_CH_TRANS_COUNT, 2);
+    qtest_writel(qts, DMA_BASE + DMA_CH_CTRL_TRIG, ctrl_chan_ctrl);
+
+    qtest_memread(qts, write_addr, dest, sizeof(dest));
+    g_assert_cmpmem(dest, sizeof(dest), source, sizeof(source));
+    g_assert_cmphex(qtest_readl(qts, chan1 + DMA_CH_TRANS_COUNT), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, chan1 + DMA_CH_CTRL_TRIG) &
+                    DMA_CTRL_BUSY, ==, 0);
+    g_assert_cmphex(qtest_readl(qts, DMA_BASE + DMA_INTR) & BIT(1), ==,
+                    BIT(1));
+
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -303,6 +367,8 @@ int main(int argc, char **argv)
                    test_dma_error_status);
     qtest_add_func("/rp2040-dma/timer-dreq",
                    test_dma_timer_dreq);
+    qtest_add_func("/rp2040-dma/control-blocks",
+                   test_dma_control_blocks);
 
     return g_test_run();
 }
