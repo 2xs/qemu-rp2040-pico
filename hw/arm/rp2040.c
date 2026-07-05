@@ -18,6 +18,7 @@
 #include "fpu/softfloat.h"
 #include "qemu/datadir.h"
 #include "qemu/log.h"
+#include "system/runstate.h"
 #include "target/arm/cpu.h"
 #include "target/arm/cpu-qom.h"
 #include "trace.h"
@@ -49,6 +50,7 @@
 #define RP2040_BOOTROM_FLOAT_STUBS_OFFSET 0x0600
 #define RP2040_BOOTROM_DOUBLE_STUBS_OFFSET 0x0b00
 #define RP2040_BOOTROM_FP_STUB_SIZE 36
+#define RP2040_BOOTROM_HARDFAULT_EXIT_OFFSET 0x0f80
 #define RP2040_BOOTROM_FUNC_TABLE_ENTRY_SIZE 4
 #define RP2040_BOOTROM_DATA_TABLE_ENTRY_SIZE 4
 #define RP2040_BOOTROM_NYI_CODE_LITERAL_OFFSET 20
@@ -70,6 +72,8 @@
 #define RP2040_SYNTHETIC_ROM_DBG_RESULT2 0x1c
 #define RP2040_SYNTHETIC_ROM_DBG_RESULT3 0x20
 #define RP2040_SYNTHETIC_ROM_DBG_FLASH_COUNT0 0x40
+
+#define RP2040_SYNTHETIC_ROM_DBG_CMD_EXIT 0x54495845 /* "EXIT" */
 
 #define RP2040_SYNTHETIC_FP_CMD_MASK   0xffffff00
 #define RP2040_SYNTHETIC_FP_CMD_FLOAT  0x80000000
@@ -480,6 +484,25 @@ static const uint8_t rp2040_bootrom_nyi_stub[] = {
     0x00, 0x00, 0x00, 0x00, /* function code literal */
 };
 
+static const uint8_t rp2040_bootrom_hardfault_exit[] = {
+    0xef, 0xf3, 0x08, 0x81, /* mrs r1, msp */
+    0x8a, 0x69,             /* ldr r2, [r1, #24] ; stacked PC */
+    0x13, 0x88,             /* ldrh r3, [r2] */
+    0x04, 0x4c,             /* ldr r4, [pc, #16] ; 0xbe00 */
+    0xa3, 0x42,             /* cmp r3, r4 */
+    0x04, 0xd1,             /* bne hang */
+    0x08, 0x68,             /* ldr r0, [r1] ; stacked R0/status */
+    0x03, 0x4c,             /* ldr r4, [pc, #12] ; debug base */
+    0x60, 0x60,             /* str r0, [r4, #4] */
+    0x03, 0x48,             /* ldr r0, [pc, #12] ; EXIT command */
+    0x20, 0x60,             /* str r0, [r4] */
+    0xfe, 0xe7,             /* hang: b hang */
+    0x00, 0x00,             /* align literal pool */
+    0x00, 0xbe, 0x00, 0x00, /* 0xbe00 */
+    0x00, 0x00, 0xff, 0x5f, /* 0x5fff0000 */
+    0x45, 0x58, 0x49, 0x54, /* "EXIT" */
+};
+
 static void rp2040_store_hword(uint8_t *rom, uint32_t offset, uint16_t value)
 {
     rom[offset] = value;
@@ -555,6 +578,10 @@ static void rp2040_install_synthetic_bootrom(void)
     int i;
 
     memcpy(rom, rp2040_bootrom, sizeof(rp2040_bootrom));
+    memcpy(rom + RP2040_BOOTROM_HARDFAULT_EXIT_OFFSET,
+           rp2040_bootrom_hardfault_exit,
+           sizeof(rp2040_bootrom_hardfault_exit));
+    rp2040_store_word(rom, 0x0c, RP2040_BOOTROM_HARDFAULT_EXIT_OFFSET | 1);
     rom[RP2040_BOOTROM_ROM_VERSION_OFFSET] =
         RP2040_BOOTROM_SYNTHETIC_ROM_VERSION;
     memcpy(rom + RP2040_BOOTROM_LOOKUP_OFFSET, rp2040_bootrom_lookup,
@@ -1347,6 +1374,12 @@ static void rp2040_synthetic_rom_dbg_write(void *opaque, hwaddr addr,
         return;
     }
 
+    if (command == RP2040_SYNTHETIC_ROM_DBG_CMD_EXIT) {
+        qemu_system_shutdown_request_with_code(SHUTDOWN_CAUSE_GUEST_SHUTDOWN,
+                                               s->synthetic_rom_dbg_arg[0]);
+        return;
+    }
+
     switch (code) {
     case RP2040_ROM_TABLE_CODE('C', 'X'):
         rp2040_synthetic_flash_helper_hit(
@@ -1678,6 +1711,10 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->xip), errp)) {
         return;
+    }
+    if (!s->bootrom_file) {
+        rp2040_xip_set_synthetic_hardfault_vector(
+            &s->xip, RP2040_BOOTROM_HARDFAULT_EXIT_OFFSET | 1);
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 0, RP2040_XIP_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 1, RP2040_XIP_CTRL_BASE);

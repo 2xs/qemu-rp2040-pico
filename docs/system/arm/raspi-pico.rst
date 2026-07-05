@@ -299,6 +299,20 @@ produce the same architectural result more simply than exercising the full
 hardware path.  It is therefore a functional acceleration path, not a claim
 that the real RP2040 mask ROM behaves that way internally.
 
+The synthetic ROM also provides a CI-friendly program-exit path for Pico SDK
+firmware.  The SDK ``_exit()`` implementation executes ``bkpt #0`` so a real
+debug probe can stop at program exit.  When no debugger intercepts that
+instruction, the synthetic ROM arranges for the application HardFault vector
+read from XIP to resolve to a ROM handler, without modifying the stored flash
+contents.  That handler verifies that the faulting instruction is exactly
+``bkpt #0`` and then asks QEMU's synthetic pseudo-device to shut down with the
+stacked ``r0`` value as the process exit status.  Other HardFaults still hang
+in the ROM handler.  This behaviour is only enabled for the synthetic ROM path
+and is intended as a valid way for CI tests to terminate QEMU cleanly after a
+firmware test calls ``exit(status)``.  When QEMU's ARM M-profile ``BKPT``
+handling is routed to an attached gdbstub, the debugger sees the breakpoint
+first and this synthetic HardFault exit path is not used.
+
 Fuller hardware-compatibility testing should use the external ``pipico.rom``
 mask ROM path.  That path is intentionally closer to the real boot ROM flow:
 firmware reaches the ROM supplied by the RFC artifact and flash operations

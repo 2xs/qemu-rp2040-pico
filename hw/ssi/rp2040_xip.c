@@ -446,7 +446,20 @@ static MemTxResult rp2040_xip_read(void *opaque, hwaddr addr, uint64_t *data,
     }
 
     for (i = 0; i < size; i++) {
-        value |= (uint64_t)s->storage[addr + i] << (i * 8);
+        hwaddr cur = addr + i;
+        uint8_t byte = s->storage[cur];
+
+        /*
+         * Synthetic ROM CI exit support: let firmware copy a HardFault vector
+         * that points back into ROM without mutating persistent flash storage.
+         */
+        if (s->synthetic_hardfault_vector_enabled &&
+            cur >= RP2040_BOOT2_SIZE + 0x0c &&
+            cur < RP2040_BOOT2_SIZE + 0x10) {
+            byte = extract32(s->synthetic_hardfault_vector,
+                             (cur - (RP2040_BOOT2_SIZE + 0x0c)) * 8, 8);
+        }
+        value |= (uint64_t)byte << (i * 8);
     }
     *data = value;
     return MEMTX_OK;
@@ -752,6 +765,13 @@ static const MemoryRegionOps rp2040_xip_ssi_ops = {
 void rp2040_xip_set_writable(RP2040XipState *s, bool writable)
 {
     s->xip_writable = writable;
+}
+
+void rp2040_xip_set_synthetic_hardfault_vector(RP2040XipState *s,
+                                               uint32_t handler)
+{
+    s->synthetic_hardfault_vector = handler;
+    s->synthetic_hardfault_vector_enabled = true;
 }
 
 void rp2040_xip_qspi_cs(RP2040XipState *s, bool high)

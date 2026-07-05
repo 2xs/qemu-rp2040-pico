@@ -47,6 +47,8 @@ struct RP2040XipState {
 
     bool write_enable;
     bool busy;
+    bool synthetic_hardfault_vector_enabled;
+    uint32_t synthetic_hardfault_vector;
     bool qspi_cs_high;
     uint8_t tx[260];
     unsigned tx_len;
@@ -57,6 +59,8 @@ struct RP2040XipState {
 };
 
 void rp2040_xip_set_writable(RP2040XipState *s, bool writable);
+void rp2040_xip_set_synthetic_hardfault_vector(RP2040XipState *s,
+                                               uint32_t handler);
 void rp2040_xip_load_image(RP2040XipState *s, const char *filename,
                            Error **errp);
 void rp2040_xip_qspi_cs(RP2040XipState *s, bool high);
