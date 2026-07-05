@@ -254,6 +254,7 @@ qtests_arm = \
                                                        'rp2040-busctrl-test',
                                                        'rp2040-dma-test',
                                                        'rp2040-ioqspi-test',
+                                                       'rp2040-resets-test',
                                                        'rp2040-rosc-test',
                                                        'rp2040-sio-test',
                                                        'rp2040-tbman-test',
