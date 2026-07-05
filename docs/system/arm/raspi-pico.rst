@@ -480,9 +480,13 @@ Known limitations
  * ``PADS_BANK0`` and ``PADS_QSPI`` store documented pad-control registers and
    implement RP2040 atomic aliases.  They do not model electrical pad
    behaviour and do not currently gate UART or XIP operation.
- * The XIP cache, streaming FIFO and detailed timing are not yet modeled.  The
-   XIP control and SSI APB register blocks do handle the RP2040 atomic
-   ``XOR``/``SET``/``CLR`` aliases.
+ * The XIP cache and detailed timing are not yet modeled.  ``XIP_FLUSH`` is
+   treated as immediately complete, and ``XIP_CTR_HIT``/``XIP_CTR_ACC`` do not
+   report real cache hit/miss behaviour.  The Pico SDK ``cache_perfctr``
+   example is therefore expected to remain a partial validation: ordinary XIP
+   execution works, but cache-performance measurements are not meaningful in
+   this emulation.  The XIP control and SSI APB register blocks do handle the
+   RP2040 atomic ``XOR``/``SET``/``CLR`` aliases.
  * The external flash unique ID is modeled as an 8-byte QEMU property exposed
    through the SPI NOR ``0x4b`` RUID command.  It is stable by default and can
    be overridden with ``flash-uid``; it is not persisted in ``flash-file``.
