@@ -1725,13 +1725,6 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->busctrl), 0, RP2040_BUSCTRL_BASE);
 
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->clocks), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->clocks), 0, RP2040_CLOCKS_BASE);
-    clock_set_source(s->sysclk, qdev_get_clock_out(DEVICE(&s->clocks),
-                                                   "clk-sys"));
-
     object_property_set_link(OBJECT(&s->dma), "memory",
                              OBJECT(s->board_memory), &err);
     if (err != NULL) {
@@ -1792,6 +1785,17 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->pll_usb), 0, RP2040_PLL_USB_BASE);
+
+    qdev_connect_clock_in(DEVICE(&s->clocks), "pll-sys",
+                          qdev_get_clock_out(DEVICE(&s->pll_sys), "clk"));
+    qdev_connect_clock_in(DEVICE(&s->clocks), "pll-usb",
+                          qdev_get_clock_out(DEVICE(&s->pll_usb), "clk"));
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->clocks), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->clocks), 0, RP2040_CLOCKS_BASE);
+    clock_set_source(s->sysclk, qdev_get_clock_out(DEVICE(&s->clocks),
+                                                   "clk-sys"));
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->psm), errp)) {
         return;

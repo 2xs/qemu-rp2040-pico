@@ -27,6 +27,8 @@ struct RP2040ClocksState {
     Clock *clk_usb;
     Clock *clk_adc;
     Clock *clk_rtc;
+    Clock *pll_sys;
+    Clock *pll_usb;
 
     uint32_t regs[0x100 / 4];
 };

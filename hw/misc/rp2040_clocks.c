@@ -14,8 +14,6 @@
 
 #define ROSC_HZ     6000000
 #define XOSC_HZ     12000000
-#define PLL_SYS_HZ  125000000
-#define PLL_USB_HZ  48000000
 
 #define CLK_GPOUT0_CTRL      0x00
 #define CLK_REF_CTRL         0x30
@@ -59,6 +57,8 @@
 #define ATOMIC_SET           0x2000
 #define ATOMIC_CLR           0x3000
 
+static void rp2040_clocks_update(RP2040ClocksState *s);
+
 static uint32_t rp2040_clocks_div(uint32_t reg)
 {
     uint32_t div = reg >> 8;
@@ -66,26 +66,73 @@ static uint32_t rp2040_clocks_div(uint32_t reg)
     return div == 0 ? 1u << 16 : div;
 }
 
-static unsigned rp2040_clocks_aux_freq(uint32_t auxsrc)
+static unsigned rp2040_clocks_hz(Clock *clk)
 {
-    switch (auxsrc & 0xf) {
+    return MIN(clock_get_hz(clk), UINT_MAX);
+}
+
+static unsigned rp2040_clocks_sys_aux_freq(RP2040ClocksState *s,
+                                           uint32_t auxsrc)
+{
+    switch (auxsrc & 0x7) {
     case 0x0:
-        return PLL_SYS_HZ;
-    case 0x3:
-        return PLL_USB_HZ;
-    case 0x4:
+        return rp2040_clocks_hz(s->pll_sys);
+    case 0x1:
+        return rp2040_clocks_hz(s->pll_usb);
+    case 0x2:
         return ROSC_HZ;
-    case 0x5:
+    case 0x3:
         return XOSC_HZ;
-    case 0x6:
-        return PLL_SYS_HZ;
-    case 0x7:
-        return PLL_USB_HZ;
-    case 0x8:
-        return PLL_USB_HZ;
-    case 0x9:
-        return 46875;
-    case 0xa:
+    default:
+        return 0;
+    }
+}
+
+static unsigned rp2040_clocks_ref_aux_freq(RP2040ClocksState *s,
+                                           uint32_t auxsrc)
+{
+    switch (auxsrc & 0x3) {
+    case 0x0:
+        return rp2040_clocks_hz(s->pll_usb);
+    case 0x1:
+        return ROSC_HZ;
+    case 0x2:
+        return XOSC_HZ;
+    default:
+        return 0;
+    }
+}
+
+static unsigned rp2040_clocks_peri_aux_freq(RP2040ClocksState *s,
+                                            uint32_t auxsrc)
+{
+    switch (auxsrc & 0x7) {
+    case 0x0:
+        return rp2040_clocks_hz(s->clk_sys);
+    case 0x1:
+        return rp2040_clocks_hz(s->pll_sys);
+    case 0x2:
+        return rp2040_clocks_hz(s->pll_usb);
+    case 0x3:
+        return ROSC_HZ;
+    case 0x4:
+        return XOSC_HZ;
+    default:
+        return 0;
+    }
+}
+
+static unsigned rp2040_clocks_usb_adc_rtc_aux_freq(RP2040ClocksState *s,
+                                                   uint32_t auxsrc)
+{
+    switch (auxsrc & 0x7) {
+    case 0x0:
+        return rp2040_clocks_hz(s->pll_usb);
+    case 0x1:
+        return rp2040_clocks_hz(s->pll_sys);
+    case 0x2:
+        return ROSC_HZ;
+    case 0x3:
         return XOSC_HZ;
     default:
         return 0;
@@ -108,7 +155,8 @@ static unsigned rp2040_clocks_ref_freq(RP2040ClocksState *s)
         freq = ROSC_HZ;
         break;
     case 1:
-        freq = rp2040_clocks_aux_freq(rp2040_clocks_ctrl_auxsrc(ctrl));
+        freq = rp2040_clocks_ref_aux_freq(s,
+                                          rp2040_clocks_ctrl_auxsrc(ctrl));
         break;
     case 2:
         freq = XOSC_HZ;
@@ -125,16 +173,33 @@ static unsigned rp2040_clocks_sys_freq(RP2040ClocksState *s)
 {
     uint32_t ctrl = s->regs[CLK_SYS_CTRL / 4];
     uint32_t src = extract32(ctrl, 0, 1);
-    unsigned freq = src ?
-                    rp2040_clocks_aux_freq(rp2040_clocks_ctrl_auxsrc(ctrl)) :
-                    rp2040_clocks_ref_freq(s);
+    unsigned freq;
+
+    if (src) {
+        freq = rp2040_clocks_sys_aux_freq(s,
+                                          rp2040_clocks_ctrl_auxsrc(ctrl));
+    } else {
+        freq = rp2040_clocks_ref_freq(s);
+    }
 
     return freq / rp2040_clocks_div(s->regs[CLK_SYS_DIV / 4]);
 }
 
-static unsigned rp2040_clocks_simple_freq(RP2040ClocksState *s,
-                                          uint32_t ctrl_off,
-                                          uint32_t div_off)
+static unsigned rp2040_clocks_peri_freq(RP2040ClocksState *s)
+{
+    uint32_t ctrl = s->regs[CLK_PERI_CTRL / 4];
+
+    if (!(ctrl & CTRL_ENABLE)) {
+        return 0;
+    }
+
+    return rp2040_clocks_peri_aux_freq(s, rp2040_clocks_ctrl_auxsrc(ctrl)) /
+           rp2040_clocks_div(s->regs[CLK_PERI_DIV / 4]);
+}
+
+static unsigned rp2040_clocks_usb_adc_rtc_freq(RP2040ClocksState *s,
+                                               uint32_t ctrl_off,
+                                               uint32_t div_off)
 {
     uint32_t ctrl = s->regs[ctrl_off / 4];
 
@@ -142,7 +207,8 @@ static unsigned rp2040_clocks_simple_freq(RP2040ClocksState *s,
         return 0;
     }
 
-    return rp2040_clocks_aux_freq(rp2040_clocks_ctrl_auxsrc(ctrl)) /
+    return rp2040_clocks_usb_adc_rtc_aux_freq(s,
+                                              rp2040_clocks_ctrl_auxsrc(ctrl)) /
            rp2040_clocks_div(s->regs[div_off / 4]);
 }
 
@@ -153,15 +219,16 @@ static void rp2040_clocks_update(RP2040ClocksState *s)
 
     clock_update_hz(s->clk_ref, ref_hz);
     clock_update_hz(s->clk_sys, sys_hz);
-    clock_update_hz(s->clk_peri,
-                    rp2040_clocks_simple_freq(s, CLK_PERI_CTRL,
-                                              CLK_PERI_DIV));
+    clock_update_hz(s->clk_peri, rp2040_clocks_peri_freq(s));
     clock_update_hz(s->clk_usb,
-                    rp2040_clocks_simple_freq(s, CLK_USB_CTRL, CLK_USB_DIV));
+                    rp2040_clocks_usb_adc_rtc_freq(s, CLK_USB_CTRL,
+                                                   CLK_USB_DIV));
     clock_update_hz(s->clk_adc,
-                    rp2040_clocks_simple_freq(s, CLK_ADC_CTRL, CLK_ADC_DIV));
+                    rp2040_clocks_usb_adc_rtc_freq(s, CLK_ADC_CTRL,
+                                                   CLK_ADC_DIV));
     clock_update_hz(s->clk_rtc,
-                    rp2040_clocks_simple_freq(s, CLK_RTC_CTRL, CLK_RTC_DIV));
+                    rp2040_clocks_usb_adc_rtc_freq(s, CLK_RTC_CTRL,
+                                                   CLK_RTC_DIV));
 }
 
 static uint32_t rp2040_clocks_selected(RP2040ClocksState *s, hwaddr offset)
@@ -186,6 +253,16 @@ static uint32_t rp2040_clocks_fc0_result(RP2040ClocksState *s)
     unsigned khz;
 
     switch (s->regs[FC0_SRC / 4] & 0xff) {
+    case 0x01:
+        khz = rp2040_clocks_hz(s->pll_sys) / 1000;
+        break;
+    case 0x02:
+        khz = rp2040_clocks_hz(s->pll_usb) / 1000;
+        break;
+    case 0x03:
+    case 0x04:
+        khz = ROSC_HZ / 1000;
+        break;
     case 0x05:
         khz = XOSC_HZ / 1000;
         break;
@@ -198,8 +275,17 @@ static uint32_t rp2040_clocks_fc0_result(RP2040ClocksState *s)
     case 0x0a:
         khz = clock_get_hz(s->clk_peri) / 1000;
         break;
+    case 0x0b:
+        khz = clock_get_hz(s->clk_usb) / 1000;
+        break;
+    case 0x0c:
+        khz = clock_get_hz(s->clk_adc) / 1000;
+        break;
+    case 0x0d:
+        khz = clock_get_hz(s->clk_rtc) / 1000;
+        break;
     default:
-        khz = rp2040_clocks_aux_freq(s->regs[FC0_SRC / 4]) / 1000;
+        khz = 0;
         break;
     }
 
@@ -294,6 +380,11 @@ static void rp2040_clocks_write(void *opaque, hwaddr addr,
     }
 }
 
+static void rp2040_clocks_input_update(void *opaque, ClockEvent event)
+{
+    rp2040_clocks_update(opaque);
+}
+
 static const MemoryRegionOps rp2040_clocks_ops = {
     .read = rp2040_clocks_read,
     .write = rp2040_clocks_write,
@@ -340,6 +431,10 @@ static void rp2040_clocks_init(Object *obj)
     s->clk_usb = qdev_init_clock_out(dev, "clk-usb");
     s->clk_adc = qdev_init_clock_out(dev, "clk-adc");
     s->clk_rtc = qdev_init_clock_out(dev, "clk-rtc");
+    s->pll_sys = qdev_init_clock_in(dev, "pll-sys",
+                                    rp2040_clocks_input_update, s, 0);
+    s->pll_usb = qdev_init_clock_in(dev, "pll-usb",
+                                    rp2040_clocks_input_update, s, 0);
 
     memory_region_init_io(&s->iomem, obj, &rp2040_clocks_ops, s,
                           "rp2040.clocks", RP2040_CLOCKS_SIZE);
