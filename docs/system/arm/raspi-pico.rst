@@ -485,8 +485,10 @@ Known limitations
    report real cache hit/miss behaviour.  The Pico SDK ``cache_perfctr``
    example is therefore expected to remain a partial validation: ordinary XIP
    execution works, but cache-performance measurements are not meaningful in
-   this emulation.  The XIP control and SSI APB register blocks do handle the
-   RP2040 atomic ``XOR``/``SET``/``CLR`` aliases.
+   this emulation.  The XIP streaming FIFO is modeled functionally for direct
+   reads and DMA from ``XIP_AUX_BASE``, but without flash idle-cycle timing.
+   The XIP control and SSI APB register blocks do handle the RP2040 atomic
+   ``XOR``/``SET``/``CLR`` aliases.
  * The external flash unique ID is modeled as an 8-byte QEMU property exposed
    through the SPI NOR ``0x4b`` RUID command.  It is stable by default and can
    be overridden with ``flash-uid``; it is not persisted in ``flash-file``.
@@ -507,10 +509,11 @@ Known limitations
  * USB, PIO and most peripherals are not yet implemented.  USB DPRAM is
    present as RAM and ``USBCTRL_REGS`` stores register state, but USB
    packet-level behavior is not modeled.  DMA supports memory-to-memory
-   transfers, XIP/SSI RX DREQ pacing, UART0/UART1 TX/RX DREQ pacing, DMA timer
-   pacing from QEMU virtual time, read/write ring wrapping, the documented
-   sniff accumulator modes, immediate channel abort, and bus-error status
-   reporting through ``CTRL_TRIG``, ``INTR`` and ``INTS0/1``.  UART DREQs are
+   transfers, XIP stream and XIP/SSI RX DREQ pacing, UART0/UART1 TX/RX DREQ
+   pacing, DMA timer pacing from QEMU virtual time, read/write ring wrapping,
+   the documented sniff accumulator modes, immediate channel abort, and
+   bus-error status reporting through ``CTRL_TRIG``, ``INTR`` and ``INTS0/1``.
+   UART DREQs are
    exposed through the current PL011-backed UART models and follow the PL011
    FIFO occupancy plus ``UARTDMACR`` enable bits; fine-grained UART timing is
    not modeled.  DMA timer pacing uses the documented ``X/Y`` fractional timer

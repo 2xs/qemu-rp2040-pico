@@ -21,7 +21,18 @@
 #define RP2040_XIP_CTRL_ERR_BADWRITE 0x2
 #define RP2040_XIP_STAT_FLUSH_READY  0x1
 #define RP2040_XIP_STAT_FIFO_EMPTY   0x2
+#define RP2040_XIP_STAT_FIFO_FULL    0x4
 #define RP2040_XIP_FLASH_BASE        0x10000000
+
+#define RP2040_XIP_CTRL              0x00
+#define RP2040_XIP_FLUSH             0x04
+#define RP2040_XIP_STAT              0x08
+#define RP2040_XIP_CTR_HIT           0x0c
+#define RP2040_XIP_CTR_ACC           0x10
+#define RP2040_XIP_STREAM_ADDR       0x14
+#define RP2040_XIP_STREAM_CTR        0x18
+#define RP2040_XIP_STREAM_FIFO       0x1c
+#define RP2040_XIP_STREAM_CTR_MASK   0x003fffff
 
 #define RP2040_SSI_CTRLR0     0x00
 #define RP2040_SSI_CTRLR1     0x04
@@ -132,6 +143,76 @@ static void rp2040_xip_rx_push(RP2040XipState *s, uint8_t value)
         s->rx[s->rx_len++] = value;
         qemu_irq_pulse(s->dreq_rx);
     }
+}
+
+static void rp2040_xip_update_stream_dreq(RP2040XipState *s)
+{
+    qemu_set_irq(s->dreq_stream, s->stream_fifo_len > s->stream_fifo_pos);
+}
+
+static void rp2040_xip_stream_clear(RP2040XipState *s)
+{
+    s->stream_fifo_len = 0;
+    s->stream_fifo_pos = 0;
+    rp2040_xip_update_stream_dreq(s);
+}
+
+static uint32_t rp2040_xip_stream_word(RP2040XipState *s)
+{
+    uint32_t off;
+
+    if (s->stream_addr < RP2040_XIP_FLASH_BASE ||
+        s->stream_addr - RP2040_XIP_FLASH_BASE > s->flash_size - 4) {
+        return 0xffffffff;
+    }
+
+    off = s->stream_addr - RP2040_XIP_FLASH_BASE;
+    return ldl_le_p(s->storage + off);
+}
+
+static void rp2040_xip_stream_fill(RP2040XipState *s)
+{
+    if (s->stream_fifo_pos == s->stream_fifo_len) {
+        s->stream_fifo_pos = 0;
+        s->stream_fifo_len = 0;
+    }
+
+    while (s->stream_ctr > 0 &&
+           s->stream_fifo_len < ARRAY_SIZE(s->stream_fifo)) {
+        s->stream_fifo[s->stream_fifo_len++] = rp2040_xip_stream_word(s);
+        s->stream_addr += 4;
+        s->stream_ctr--;
+    }
+
+    rp2040_xip_update_stream_dreq(s);
+}
+
+static uint32_t rp2040_xip_stream_pop(RP2040XipState *s)
+{
+    uint32_t value = 0;
+
+    rp2040_xip_stream_fill(s);
+    if (s->stream_fifo_pos < s->stream_fifo_len) {
+        value = s->stream_fifo[s->stream_fifo_pos++];
+    }
+    rp2040_xip_stream_fill(s);
+    return value;
+}
+
+static uint32_t rp2040_xip_stat(RP2040XipState *s)
+{
+    uint32_t stat = RP2040_XIP_STAT_FLUSH_READY;
+
+    rp2040_xip_stream_fill(s);
+    if (s->stream_fifo_pos == s->stream_fifo_len) {
+        stat |= RP2040_XIP_STAT_FIFO_EMPTY;
+    }
+    if (s->stream_fifo_len - s->stream_fifo_pos ==
+        ARRAY_SIZE(s->stream_fifo)) {
+        stat |= RP2040_XIP_STAT_FIFO_FULL;
+    }
+
+    return stat;
 }
 
 static uint8_t rp2040_xip_status(RP2040XipState *s)
@@ -511,14 +592,25 @@ static uint64_t rp2040_xip_ctrl_read(void *opaque, hwaddr addr, unsigned size)
     uint64_t value;
 
     switch (offset) {
-    case 0x00:
+    case RP2040_XIP_CTRL:
         value = s->xip_ctrl;
         break;
-    case 0x04:
+    case RP2040_XIP_FLUSH:
+    case RP2040_XIP_CTR_HIT:
+    case RP2040_XIP_CTR_ACC:
         value = 0;
         break;
-    case 0x08:
-        value = RP2040_XIP_STAT_FLUSH_READY | RP2040_XIP_STAT_FIFO_EMPTY;
+    case RP2040_XIP_STAT:
+        value = rp2040_xip_stat(s);
+        break;
+    case RP2040_XIP_STREAM_ADDR:
+        value = s->stream_addr;
+        break;
+    case RP2040_XIP_STREAM_CTR:
+        value = s->stream_ctr;
+        break;
+    case RP2040_XIP_STREAM_FIFO:
+        value = rp2040_xip_stream_pop(s);
         break;
     default:
         value = 0;
@@ -543,15 +635,27 @@ static void rp2040_xip_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
     uint32_t new_value;
 
     switch (offset) {
-    case 0x00:
+    case RP2040_XIP_CTRL:
         new_value = rp2040_xip_apply_alias(s->xip_ctrl, value, alias);
         s->xip_ctrl = new_value & (RP2040_XIP_CTRL_EN |
                                    RP2040_XIP_CTRL_ERR_BADWRITE);
         break;
-    case 0x04:
+    case RP2040_XIP_FLUSH:
+        rp2040_xip_stream_clear(s);
         break;
-    case 0x0c:
-    case 0x10:
+    case RP2040_XIP_CTR_HIT:
+    case RP2040_XIP_CTR_ACC:
+        break;
+    case RP2040_XIP_STREAM_ADDR:
+        s->stream_addr = value & ~3u;
+        break;
+    case RP2040_XIP_STREAM_CTR:
+        s->stream_ctr = value & RP2040_XIP_STREAM_CTR_MASK;
+        if (s->stream_ctr == 0) {
+            rp2040_xip_stream_clear(s);
+        } else {
+            rp2040_xip_stream_fill(s);
+        }
         break;
     default:
         qemu_log_mask(LOG_UNIMP, "rp2040.xip.ctrl: unimplemented write "
@@ -562,6 +666,18 @@ static void rp2040_xip_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
                       size << 1, value);
         break;
     }
+}
+
+static uint64_t rp2040_xip_aux_read(void *opaque, hwaddr addr, unsigned size)
+{
+    return rp2040_xip_stream_pop(opaque);
+}
+
+static void rp2040_xip_aux_write(void *opaque, hwaddr addr,
+                                 uint64_t value, unsigned size)
+{
+    rp2040_log_nyi("xip.aux", "write",
+                   "XIP auxiliary stream FIFO is read-only");
 }
 
 static uint64_t rp2040_xip_ssi_read(void *opaque, hwaddr addr, unsigned size)
@@ -779,6 +895,16 @@ static const MemoryRegionOps rp2040_xip_ssi_ops = {
         .min_access_size = 1,
         .max_access_size = 4,
         .unaligned = true,
+    },
+};
+
+static const MemoryRegionOps rp2040_xip_aux_ops = {
+    .read = rp2040_xip_aux_read,
+    .write = rp2040_xip_aux_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 4,
+        .max_access_size = 4,
     },
 };
 
@@ -1111,10 +1237,13 @@ static void rp2040_xip_realize(DeviceState *dev, Error **errp)
                           "rp2040.xip.ctrl", RP2040_XIP_CTRL_SIZE);
     memory_region_init_io(&s->ssi, OBJECT(dev), &rp2040_xip_ssi_ops, s,
                           "rp2040.xip.ssi", RP2040_XIP_SSI_SIZE);
+    memory_region_init_io(&s->aux, OBJECT(dev), &rp2040_xip_aux_ops, s,
+                          "rp2040.xip.aux", RP2040_XIP_AUX_SIZE);
 
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->xip);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->ctrl);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->ssi);
+    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->aux);
 }
 
 static void rp2040_xip_reset(DeviceState *dev)
@@ -1135,6 +1264,9 @@ static void rp2040_xip_reset(DeviceState *dev)
     s->write_enable = false;
     s->busy = false;
     s->qspi_cs_high = true;
+    s->stream_addr = 0;
+    s->stream_ctr = 0;
+    rp2040_xip_stream_clear(s);
     rp2040_xip_reset_tx(s);
     rp2040_xip_rx_clear(s);
 }
@@ -1152,6 +1284,7 @@ static void rp2040_xip_init(Object *obj)
     RP2040XipState *s = RP2040_XIP(obj);
 
     qdev_init_gpio_out_named(DEVICE(obj), &s->dreq_rx, "dreq-rx", 1);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->dreq_stream, "dreq-stream", 1);
 }
 
 static const Property rp2040_xip_properties[] = {

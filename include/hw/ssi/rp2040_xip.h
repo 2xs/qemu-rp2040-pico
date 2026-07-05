@@ -16,8 +16,11 @@ OBJECT_DECLARE_SIMPLE_TYPE(RP2040XipState, RP2040_XIP)
 
 #define RP2040_XIP_CTRL_BASE 0x14000000
 #define RP2040_XIP_SSI_BASE  0x18000000
+#define RP2040_XIP_AUX_BASE  0x50400000
 #define RP2040_XIP_CTRL_SIZE 0x4000
 #define RP2040_XIP_SSI_SIZE  0x4000
+#define RP2040_XIP_AUX_SIZE  0x4000
+#define RP2040_XIP_STREAM_FIFO_DEPTH 4
 
 struct RP2040XipState {
     SysBusDevice parent_obj;
@@ -25,7 +28,9 @@ struct RP2040XipState {
     MemoryRegion xip;
     MemoryRegion ctrl;
     MemoryRegion ssi;
+    MemoryRegion aux;
     qemu_irq dreq_rx;
+    qemu_irq dreq_stream;
 
     uint32_t flash_size;
     char *flash_file;
@@ -57,6 +62,12 @@ struct RP2040XipState {
     uint8_t rx[16];
     unsigned rx_len;
     unsigned rx_pos;
+
+    uint32_t stream_addr;
+    uint32_t stream_ctr;
+    uint32_t stream_fifo[RP2040_XIP_STREAM_FIFO_DEPTH];
+    unsigned stream_fifo_len;
+    unsigned stream_fifo_pos;
 };
 
 void rp2040_xip_set_writable(RP2040XipState *s, bool writable);

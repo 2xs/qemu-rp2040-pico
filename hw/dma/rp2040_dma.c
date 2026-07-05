@@ -178,7 +178,8 @@ static bool rp2040_dma_treq_is_ready_sink(uint32_t treq)
 static bool rp2040_dma_treq_is_connected_level(uint32_t treq)
 {
     return treq == RP2040_DREQ_UART0_TX || treq == RP2040_DREQ_UART0_RX ||
-           treq == RP2040_DREQ_UART1_TX || treq == RP2040_DREQ_UART1_RX;
+           treq == RP2040_DREQ_UART1_TX || treq == RP2040_DREQ_UART1_RX ||
+           treq == RP2040_DREQ_XIP_STREAM;
 }
 
 static bool rp2040_dma_treq_is_timer(uint32_t treq)
@@ -513,8 +514,7 @@ static void rp2040_dma_start_channel(RP2040DmaState *s, unsigned index)
     if (treq == RP2040_DREQ_FORCE || rp2040_dma_treq_is_ready_sink(treq)) {
         rp2040_dma_run_beats(s, index, UINT32_MAX);
     } else if ((rp2040_dma_treq_is_connected_level(treq) ||
-                treq == RP2040_DREQ_XIP_SSIRX) &&
-               s->dreq_level[treq]) {
+                treq == RP2040_DREQ_XIP_SSIRX) && s->dreq_level[treq]) {
         rp2040_dma_dreq_pulse(s, treq);
     } else if (treq != RP2040_DREQ_XIP_SSIRX &&
                !rp2040_dma_treq_is_connected_level(treq) &&

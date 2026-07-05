@@ -1719,6 +1719,7 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 0, RP2040_XIP_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 1, RP2040_XIP_CTRL_BASE);
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 2, RP2040_XIP_SSI_BASE);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->xip), 3, RP2040_XIP_AUX_BASE);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->busctrl), errp)) {
         return;
@@ -1741,6 +1742,10 @@ static void rp2040_soc_realize(DeviceState *dev, Error **errp)
                                 qdev_get_gpio_in_named(DEVICE(&s->dma),
                                                        "dreq",
                                                        RP2040_DREQ_XIP_SSIRX));
+    qdev_connect_gpio_out_named(DEVICE(&s->xip), "dreq-stream", 0,
+                                qdev_get_gpio_in_named(DEVICE(&s->dma),
+                                                       "dreq",
+                                                       RP2040_DREQ_XIP_STREAM));
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->iobank0), errp)) {
         return;
